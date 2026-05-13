@@ -1,0 +1,35 @@
+{% extends "base.html" %}
+{% block title %}{{ meta.idea }} · 3D Models AI{% endblock %}
+{% block header_actions %}
+<a href="/" class="text-sm text-stone-600 hover:text-stone-900">← Tutte</a>
+{% endblock %}
+{% block content %}
+
+<section class="space-y-2">
+  <h1 class="text-2xl font-semibold leading-tight">{{ meta.idea }}</h1>
+  <p class="text-xs text-stone-500">creata {{ meta.created_at }}</p>
+</section>
+
+{% if meta.references %}
+<section class="mt-4">
+  <p class="text-xs font-medium text-stone-500 mb-2 uppercase tracking-wide">Reference</p>
+  <div class="grid grid-cols-3 gap-2">
+    {% for ref in meta.references %}
+    <img src="/sessions/{{ session_id }}/files/{{ ref }}" class="aspect-square object-cover rounded-lg bg-stone-100">
+    {% endfor %}
+  </div>
+</section>
+{% endif %}
+
+<section class="mt-6"
+         id="iterations-wrapper"
+         hx-ext="sse"
+         sse-connect="/events/sessions/{{ session_id }}"
+         sse-swap="iteration_added,3d_ready"
+         hx-get="/sessions/{{ session_id }}/fragment"
+         hx-trigger="sse:iteration_added,sse:3d_ready"
+         hx-swap="innerHTML">
+  {% include "_iteration_list.html" %}
+</section>
+
+{% endblock %}

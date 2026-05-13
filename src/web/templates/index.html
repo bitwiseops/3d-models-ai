@@ -1,0 +1,45 @@
+{% extends "base.html" %}
+{% block title %}Sessioni · 3D Models AI{% endblock %}
+{% block header_actions %}
+<button type="button"
+        onclick="document.getElementById('new-session').showModal()"
+        class="inline-flex items-center gap-1 rounded-full bg-stone-900 text-white px-3 py-1.5 text-sm font-medium hover:bg-stone-800 min-h-9">
+  <span class="text-lg leading-none">+</span> Nuova
+</button>
+{% endblock %}
+{% block content %}
+<section class="space-y-3"
+         hx-get="/sessions"
+         hx-trigger="every 5s"
+         hx-swap="innerHTML"
+         hx-target="this"
+         id="session-list-wrapper">
+  {% include "_session_list.html" %}
+</section>
+
+<dialog id="new-session" class="rounded-2xl p-0 w-[92vw] max-w-md backdrop:bg-stone-900/40">
+  <form method="post" action="/sessions" enctype="multipart/form-data" class="p-5 space-y-4">
+    <div>
+      <h2 class="text-lg font-semibold">Nuova sessione</h2>
+      <p class="text-sm text-stone-500 mt-1">Descrivi l'oggetto 3D che vuoi generare.</p>
+    </div>
+    <label class="block">
+      <span class="text-sm font-medium text-stone-700">Idea</span>
+      <textarea name="idea" required rows="3" autofocus
+                placeholder="es. fungo porcino fotorealistico"
+                class="mt-1 block w-full rounded-lg border-stone-300 bg-stone-50 px-3 py-2 text-base focus:border-stone-900 focus:ring-stone-900"></textarea>
+    </label>
+    <label class="block">
+      <span class="text-sm font-medium text-stone-700">Reference (opzionali, 1-5)</span>
+      <input type="file" name="references" multiple accept="image/*"
+             class="mt-1 block w-full text-sm text-stone-700 file:mr-3 file:rounded-md file:border-0 file:bg-stone-900 file:text-white file:px-3 file:py-1.5 file:text-sm file:font-medium">
+    </label>
+    <div class="flex justify-end gap-2 pt-2">
+      <button type="button" onclick="document.getElementById('new-session').close()"
+              class="rounded-lg px-4 py-2 text-sm font-medium text-stone-700 hover:bg-stone-100 min-h-11">Annulla</button>
+      <button type="submit"
+              class="rounded-lg bg-stone-900 text-white px-4 py-2 text-sm font-medium hover:bg-stone-800 min-h-11">Crea</button>
+    </div>
+  </form>
+</dialog>
+{% endblock %}

@@ -1,0 +1,31 @@
+<!doctype html>
+<html lang="it">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#0c0a09">
+  <title>{% block title %}Models3D-AI{% endblock %}</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://unpkg.com/htmx.org@2.0.4"></script>
+  <script src="https://unpkg.com/htmx-ext-sse@2.2.2"></script>
+  <script type="module" src="https://ajax.googleapis.com/ajax/libs/model-viewer/4.0.0/model-viewer.min.js"></script>
+  <style>
+    :root { --safe-bottom: env(safe-area-inset-bottom); }
+    body { padding-bottom: var(--safe-bottom); }
+    /* Spinner CSS only */
+    .spin { animation: spin 1s linear infinite; }
+    @keyframes spin { to { transform: rotate(360deg); } }
+  </style>
+</head>
+<body class="bg-stone-50 text-stone-900 min-h-screen antialiased">
+  <header class="sticky top-0 z-10 bg-white/95 backdrop-blur border-b border-stone-200">
+    <div class="mx-auto max-w-screen-md px-4 py-3 flex items-center justify-between">
+      <a href="/" class="text-lg font-semibold tracking-tight">3D Models AI</a>
+      {% block header_actions %}{% endblock %}
+    </div>
+  </header>
+  <main class="mx-auto max-w-screen-md px-4 py-6">
+    {% block content %}{% endblock %}
+  </main>
+</body>
+</html>

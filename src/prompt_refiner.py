@@ -15,7 +15,7 @@ L'immagine deve contenere DUE viste affiancate dello stesso soggetto, in modo ch
 - Vista posteriore a DESTRA: il soggetto ruotato di 180° rispetto alla vista frontale, stesso angolo di camera, stessa altezza, stessa scala.
 - Materiale, texture, illuminazione e sfondo IDENTICI nelle due viste.
 - Soggetto di sinistra centrato al 25% della larghezza, soggetto di destra centrato al 75% della larghezza.
-- Banda verticale vuota di sfondo (uniforme, almeno 10% della larghezza totale) al centro esatto dell'immagine, in modo che lo split al 50% sia netto e nessuna parte dei soggetti venga troncata.
+- Banda verticale vuota di sfondo (uniforme, **stretta, ~5% della larghezza totale**) al centro esatto dell'immagine: serve solo come marker per lo split front/back nel post-processing. NON deve essere larga: una banda spessa spreca risoluzione utile ai soggetti. Lo split rileverà automaticamente la sua estensione, ma tenerla sottile mantiene i soggetti più grandi e dettagliati.
 - Basi/piedi delle due viste sulla stessa quota verticale.
 - Nessuna etichetta tipo "front"/"back" o didascalia: solo i due rendering puliti.
 
@@ -58,11 +58,29 @@ def _client() -> Anthropic:
     return Anthropic(api_key=config.ANTHROPIC_API_KEY)
 
 
+def _detect_media_type(raw: bytes) -> str:
+    """Detect image media type via magic bytes. Anthropic API accetta
+    image/png, image/jpeg, image/gif, image/webp. Default a image/png.
+    Più robusto dell'estensione (utente può rinominare .jpg → .png).
+    """
+    if raw.startswith(b"\x89PNG\r\n\x1a\n"):
+        return "image/png"
+    if raw.startswith(b"\xff\xd8\xff"):
+        return "image/jpeg"
+    if raw[:6] in (b"GIF87a", b"GIF89a"):
+        return "image/gif"
+    if raw[:4] == b"RIFF" and raw[8:12] == b"WEBP":
+        return "image/webp"
+    return "image/png"
+
+
 def _image_block(image_path: Path) -> dict:
-    data = base64.standard_b64encode(image_path.read_bytes()).decode("ascii")
+    raw = image_path.read_bytes()
+    media_type = _detect_media_type(raw)
+    data = base64.standard_b64encode(raw).decode("ascii")
     return {
         "type": "image",
-        "source": {"type": "base64", "media_type": "image/png", "data": data},
+        "source": {"type": "base64", "media_type": media_type, "data": data},
     }
 
 

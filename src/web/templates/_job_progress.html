@@ -1,0 +1,7 @@
+{# Outer wrapper: subscribe SSE, sostituisce inner content ad ogni "message". #}
+<div id="job-progress-card"
+     hx-ext="sse"
+     sse-connect="/events/{{ job.job_id }}"
+     sse-swap="message">
+  {% include "_job_progress_inner.html" %}
+</div>

@@ -1,0 +1,36 @@
+{% if not sessions %}
+<div class="text-center py-12 text-stone-500">
+  <p class="text-lg">Nessuna sessione ancora.</p>
+  <p class="text-sm mt-2">Tocca <b>+ Nuova</b> per iniziare.</p>
+</div>
+{% else %}
+<ul class="space-y-3">
+  {% for s in sessions %}
+  <li>
+    <a href="/sessions/{{ s.id }}"
+       class="flex items-center gap-3 bg-white rounded-xl border border-stone-200 p-3 hover:border-stone-400 active:scale-[0.99] transition">
+      <div class="flex-shrink-0 w-16 h-16 rounded-lg bg-stone-100 overflow-hidden">
+        {% if s.thumb %}
+        <img src="/sessions/{{ s.id }}/files/{{ s.thumb }}" alt="" class="w-full h-full object-cover">
+        {% else %}
+        <div class="w-full h-full flex items-center justify-center text-stone-400 text-xs">…</div>
+        {% endif %}
+      </div>
+      <div class="flex-1 min-w-0">
+        <p class="font-medium truncate">{{ s.idea }}</p>
+        <p class="text-xs text-stone-500 mt-0.5">{{ s.iterations }} iter ·
+          {% if s.status == "completed" %}
+          <span class="text-emerald-600 font-medium">3D pronto</span>
+          {% elif s.status == "accepted" %}
+          <span class="text-amber-600 font-medium">Generazione 3D…</span>
+          {% else %}
+          <span class="text-stone-500">Bozza</span>
+          {% endif %}
+        </p>
+      </div>
+      <span class="text-stone-400">›</span>
+    </a>
+  </li>
+  {% endfor %}
+</ul>
+{% endif %}

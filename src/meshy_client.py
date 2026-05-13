@@ -1,6 +1,6 @@
 import sys
 import time
-from typing import Iterable
+from typing import Callable, Iterable
 
 import requests
 
@@ -18,11 +18,15 @@ class MeshyTaskFailed(MeshyError):
         self.detail = detail
 
 
-def _headers() -> dict:
-    if not config.MESHY_API_KEY:
+def _headers(api_key: str | None = None) -> dict:
+    """Header Bearer per Meshy. `api_key` esplicito ha priorità su `config.MESHY_API_KEY`
+    (mutabile globale, da CLI _apply_test_mode). Il web layer passa sempre `api_key`
+    per evitare race su mutazioni runtime."""
+    key = api_key or config.MESHY_API_KEY
+    if not key:
         raise MeshyError("MESHY_API_KEY non configurata.")
     return {
-        "Authorization": f"Bearer {config.MESHY_API_KEY}",
+        "Authorization": f"Bearer {key}",
         "Content-Type": "application/json",
     }
 
@@ -32,10 +36,14 @@ def text_to_image(
     *,
     ai_model: str = config.MESHY_IMAGE_MODEL,
     aspect_ratio: str = "1:1",
+    api_key: str | None = None,
 ) -> str:
     body = {"prompt": prompt, "ai_model": ai_model, "aspect_ratio": aspect_ratio}
     r = requests.post(
-        f"{config.MESHY_BASE}/text-to-image", json=body, headers=_headers(), timeout=60
+        f"{config.MESHY_BASE}/text-to-image",
+        json=body,
+        headers=_headers(api_key),
+        timeout=60,
     )
     if not r.ok:
         raise MeshyError(f"text-to-image POST {r.status_code}: {r.text}")
@@ -47,6 +55,7 @@ def image_to_image(
     reference_image_urls: list[str],
     *,
     ai_model: str = config.MESHY_IMAGE_MODEL,
+    api_key: str | None = None,
 ) -> str:
     """reference_image_urls: 1–5 voci, URL pubblici o data URI base64."""
     if not 1 <= len(reference_image_urls) <= 5:
@@ -61,7 +70,7 @@ def image_to_image(
     r = requests.post(
         f"{config.MESHY_BASE}/image-to-image",
         json=body,
-        headers=_headers(),
+        headers=_headers(api_key),
         timeout=60,
     )
     if not r.ok:
@@ -74,21 +83,39 @@ DEFAULT_TARGET_POLYCOUNT = 300_000  # massimo Meshy image-to-3d
 
 def image_to_3d(
     *,
-    input_task_id: str,
+    input_task_id: str | None = None,
+    image_url: str | None = None,
     target_formats: Iterable[str] = ("glb", "stl"),
     enable_pbr: bool = True,
     ai_model: str = config.MESHY_3D_MODEL,
     target_polycount: int = DEFAULT_TARGET_POLYCOUNT,
+    should_remesh: bool = True,
+    api_key: str | None = None,
 ) -> str:
-    body = {
-        "input_task_id": input_task_id,
+    """Genera un mesh 3D da UNA singola immagine. Specificare uno tra:
+    - `input_task_id`: task ID di una text-to-image / image-to-image Meshy
+    - `image_url`: URL pubblico o data URI base64 dell'immagine
+    """
+    if (input_task_id is None) == (image_url is None):
+        raise MeshyError(
+            "image_to_3d richiede esattamente uno tra input_task_id e image_url."
+        )
+    body: dict = {
         "ai_model": ai_model,
         "enable_pbr": enable_pbr,
         "target_formats": list(target_formats),
         "target_polycount": target_polycount,
+        "should_remesh": should_remesh,
     }
+    if input_task_id is not None:
+        body["input_task_id"] = input_task_id
+    else:
+        body["image_url"] = image_url
     r = requests.post(
-        f"{config.MESHY_BASE}/image-to-3d", json=body, headers=_headers(), timeout=60
+        f"{config.MESHY_BASE}/image-to-3d",
+        json=body,
+        headers=_headers(api_key),
+        timeout=60,
     )
     if not r.ok:
         raise MeshyError(f"image-to-3d POST {r.status_code}: {r.text}")
@@ -103,6 +130,7 @@ def multi_image_to_3d(
     ai_model: str = config.MESHY_3D_MODEL,
     target_polycount: int = DEFAULT_TARGET_POLYCOUNT,
     should_remesh: bool = True,
+    api_key: str | None = None,
 ) -> str:
     """image_urls: 1–4 voci, ognuna URL pubblico o data URI base64.
 
@@ -121,7 +149,7 @@ def multi_image_to_3d(
     r = requests.post(
         f"{config.MESHY_BASE}/multi-image-to-3d",
         json=body,
-        headers=_headers(),
+        headers=_headers(api_key),
         timeout=60,
     )
     if not r.ok:
@@ -136,26 +164,39 @@ def poll(
     interval: float = 5.0,
     max_wait: float = 900.0,
     label: str = "task",
+    on_progress: Callable[[int, str], None] | None = None,
+    api_key: str | None = None,
 ) -> dict:
+    """Polling fino a SUCCEEDED/FAILED/CANCELED o timeout.
+
+    Se `on_progress` è fornito, viene chiamato `(progress_pct, status_str)` ad
+    ogni cambio di progress E nessun output va su stdout (modalità web/SSE).
+    Senza callback: print su stdout come prima (modalità CLI).
+    """
     url = f"{config.MESHY_BASE}{endpoint}/{task_id}"
     start = time.monotonic()
     last_progress = -1
     while True:
-        r = requests.get(url, headers=_headers(), timeout=30)
+        r = requests.get(url, headers=_headers(api_key), timeout=30)
         if not r.ok:
             raise MeshyError(f"poll GET {r.status_code}: {r.text}")
         task = r.json()
         status = task.get("status")
         progress = task.get("progress", 0)
         if progress != last_progress:
-            sys.stdout.write(f"\r  {label}: {status} {progress}%   ")
-            sys.stdout.flush()
+            if on_progress is not None:
+                on_progress(int(progress), str(status or ""))
+            else:
+                sys.stdout.write(f"\r  {label}: {status} {progress}%   ")
+                sys.stdout.flush()
             last_progress = progress
         if status == "SUCCEEDED":
-            sys.stdout.write("\n")
+            if on_progress is None:
+                sys.stdout.write("\n")
             return task
         if status in ("FAILED", "CANCELED"):
-            sys.stdout.write("\n")
+            if on_progress is None:
+                sys.stdout.write("\n")
             raise MeshyTaskFailed(status, task.get("task_error") or task)
         if time.monotonic() - start > max_wait:
             raise MeshyError(f"poll timeout dopo {max_wait}s (ultimo status: {status})")

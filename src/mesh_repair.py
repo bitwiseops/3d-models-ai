@@ -2,10 +2,21 @@ import shutil
 import subprocess
 import tempfile
 from pathlib import Path
+from typing import Callable
 
 import numpy as np
 import pymeshfix
 import trimesh
+
+# Tipo del callback opzionale per progress UI/SSE.
+StepCallback = Callable[[str], None] | None
+
+
+def _emit(on_step: StepCallback, message: str) -> None:
+    """Helper: chiama il callback se presente (no-op altrimenti). I `print()`
+    nelle funzioni restano per la CLI; il callback è additivo per web/SSE."""
+    if on_step is not None:
+        on_step(message)
 
 
 DEFAULT_TARGET_FACES = 30_000
@@ -347,7 +358,12 @@ def _is_print_ready(mesh: trimesh.Trimesh, verbose: bool = True) -> bool:
     return True
 
 
-def repair(glb_path: Path, out_dir: Path) -> dict[str, Path]:
+def repair(
+    glb_path: Path,
+    out_dir: Path,
+    *,
+    on_step: StepCallback = None,
+) -> dict[str, Path]:
     """Carica GLB, applica repair watertight, esporta STL + 3MF print-ready.
 
     Pipeline:
@@ -355,6 +371,7 @@ def repair(glb_path: Path, out_dir: Path) -> dict[str, Path]:
       2. Pass leggero con trimesh: fix winding/normali, fill holes.
       3. Se ancora non-watertight, fallback aggressivo a pymeshfix (MeshFix).
     """
+    _emit(on_step, f"repair: caricamento {glb_path.name}")
     print(f"[repair] caricamento {glb_path.name}…")
     mesh = trimesh.load(str(glb_path), force="mesh", process=True)
     if not isinstance(mesh, trimesh.Trimesh):
@@ -364,6 +381,7 @@ def repair(glb_path: Path, out_dir: Path) -> dict[str, Path]:
     print(f"[repair] iniziale     → {_stats(mesh)}")
 
     if len(mesh.faces) > MAX_REPAIR_INPUT_FACES:
+        _emit(on_step, f"repair: pre-decimazione QEM a {MAX_REPAIR_INPUT_FACES:,} facce")
         print(
             f"[repair] mesh oltre la soglia ({MAX_REPAIR_INPUT_FACES:,}), "
             f"pre-decimazione QEM…"
@@ -371,6 +389,7 @@ def repair(glb_path: Path, out_dir: Path) -> dict[str, Path]:
         mesh = mesh.simplify_quadric_decimation(face_count=MAX_REPAIR_INPUT_FACES)
         print(f"[repair] post-pre-dec → {_stats(mesh)}")
 
+    _emit(on_step, "repair: trimesh fix winding/normali/fill_holes")
     mesh.update_faces(mesh.unique_faces())
     mesh.remove_unreferenced_vertices()
     mesh.merge_vertices()
@@ -388,6 +407,7 @@ def repair(glb_path: Path, out_dir: Path) -> dict[str, Path]:
                 f"Mantengo il pass trimesh."
             )
         else:
+            _emit(on_step, "repair: fallback pymeshfix")
             print("[repair] non watertight, fallback a pymeshfix (non distruttivo)…")
             pre_faces = len(mesh.faces)
             new_v, new_f = pymeshfix.clean_from_arrays(
@@ -426,6 +446,8 @@ def decimate(
     out_dir: Path,
     target_faces: int = DEFAULT_TARGET_FACES,
     suffix: str = "lowpoly",
+    *,
+    on_step: StepCallback = None,
 ) -> dict[str, Path]:
     """Decima un mesh esistente via QEM (Quadric Error Metrics) e lo esporta STL+3MF.
 
@@ -435,6 +457,7 @@ def decimate(
       3. Light fix post-decimazione (normali, fill_holes residui).
       4. Esporta `model_{suffix}.{stl,3mf}` in `out_dir`.
     """
+    _emit(on_step, f"decimate: caricamento {mesh_path.name}")
     print(f"[decimate] caricamento {mesh_path.name}…")
     mesh = trimesh.load(str(mesh_path), force="mesh", process=True)
     if not isinstance(mesh, trimesh.Trimesh):
@@ -447,6 +470,7 @@ def decimate(
         print(f"[decimate] mesh già <= {target_faces:,} facce, skip decimazione.")
         decimated = mesh
     else:
+        _emit(on_step, f"decimate: QEM target {target_faces:,} facce")
         decimated = mesh.simplify_quadric_decimation(face_count=target_faces)
         print(f"[decimate] post-QEM     → {_stats(decimated)}")
         trimesh.repair.fix_normals(decimated)
@@ -468,6 +492,8 @@ def flatten_base(
     out_dir: Path,
     base_thickness_pct: float = DEFAULT_BASE_THICKNESS_PCT,
     suffix: str = "printable",
+    *,
+    on_step: StepCallback = None,
 ) -> dict[str, Path]:
     """Taglia la base inferiore del mesh con un piano orizzontale (z = z_min + h*pct),
     tappa la sezione per creare una base piatta watertight, e trasla il risultato
@@ -477,6 +503,7 @@ def flatten_base(
     da tagliare in basso (default 2% — taglia le piccole protrusioni e rende la
     base perfettamente piatta).
     """
+    _emit(on_step, f"flatten: caricamento {mesh_path.name}")
     print(f"[flatten] caricamento {mesh_path.name}…")
     mesh = trimesh.load(str(mesh_path), force="mesh", process=True)
     if not isinstance(mesh, trimesh.Trimesh):
@@ -486,6 +513,7 @@ def flatten_base(
     # Pre-cleanup PyMeshLab del mesh INTERO: rimuove non-manifold edges
     # interni della lowpoly (residui della decimazione QEM) PRIMA dello slice.
     # Lo slice di trimesh con cap=True funziona pulito solo su input manifold.
+    _emit(on_step, "flatten 1/8: pre-cleanup PyMeshLab")
     print("[flatten] pre-cleanup PyMeshLab del mesh intero…")
     try:
         mesh = _pymeshlab_clean(mesh, close_max_hole_edges=DEFAULT_CLOSE_MAX_HOLE_EDGES)
@@ -503,6 +531,7 @@ def flatten_base(
 
     # Slice CON cap: ora il mesh in input è quasi-manifold, il cap di trimesh
     # produce una base pulita.
+    _emit(on_step, f"flatten 2/8: slice base @ z={cut_z:.2f}")
     sliced = trimesh.intersections.slice_mesh_plane(
         mesh,
         plane_normal=[0.0, 0.0, 1.0],
@@ -516,6 +545,7 @@ def flatten_base(
 
     # Post-slice cleanup: sempre, perché lo slice introduce non-manifold sul
     # join cap/walls. È il primo punto utile per testare print-readiness.
+    _emit(on_step, "flatten 3/8: post-slice cleanup PyMeshLab")
     print("[flatten] post-slice cleanup PyMeshLab…")
     pre_faces = len(sliced.faces)
     try:
@@ -535,6 +565,7 @@ def flatten_base(
 
     # Step: Blender 3D-Print Toolbox (make_manifold + fill_holes + dissolve)
     if not _is_print_ready(sliced) and _find_blender() is not None:
+        _emit(on_step, "flatten 4/8: Blender print3d_clean_non_manifold")
         print("[flatten] step: Blender print3d_clean_non_manifold…")
         pre_b = len(sliced.faces)
         try:
@@ -549,6 +580,7 @@ def flatten_base(
 
     # Step: drop floater + fix winding per-componente
     if not _is_print_ready(sliced):
+        _emit(on_step, "flatten 5/8: drop floater + fix winding")
         print("[flatten] step: drop floater + fix winding per-componente…")
         sliced = _drop_floaters(sliced)
         sliced = _fix_winding_per_component(sliced)
@@ -556,6 +588,7 @@ def flatten_base(
 
     # Step: close_holes aggressivo (chiude buchi residui medi)
     if not _is_print_ready(sliced):
+        _emit(on_step, f"flatten 6/8: close_holes(max {DEFAULT_FINAL_CLOSE_HOLE_EDGES})")
         print(f"[flatten] step: close_holes(max {DEFAULT_FINAL_CLOSE_HOLE_EDGES})…")
         try:
             sliced = _pymeshlab_clean(
@@ -569,6 +602,7 @@ def flatten_base(
     # solo se nessuno dei passi precedenti ha prodotto un mesh print-ready.
     if not _is_print_ready(sliced):
         if _find_blender() is not None:
+            _emit(on_step, "flatten 7/8: voxel remesh (last resort, lossy)")
             print("[flatten] step: voxel remesh (last resort, lossy)…")
             pre_v = len(sliced.faces)
             try:
@@ -583,7 +617,10 @@ def flatten_base(
         else:
             print("[flatten] Blender non trovato — voxel remesh skippato.")
     else:
+        _emit(on_step, "flatten: mesh print-ready early (spigoli vivi preservati)")
         print("[flatten] mesh print-ready prima del voxel remesh → spigoli vivi preservati ✓")
+
+    _emit(on_step, "flatten 8/8: export STL + 3MF")
 
     out: dict[str, Path] = {}
     for fmt in ("stl", "3mf"):

@@ -19,19 +19,62 @@ Il punto chiave: **l'output di Meshy non è print-ready**. Ha boundary edges, no
 
 ## Setup
 
+Gestione dipendenze via [`uv`](https://docs.astral.sh/uv/). Python pinned a 3.11 (`.python-version`).
+
 ```bash
-python3 -m venv .venv && source .venv/bin/activate
-pip install -r requirements.txt
+# prima volta: uv crea .venv + installa tutte le deps dal lock
+uv sync
+
+# variabili d'ambiente
 cp .env.example .env   # poi compila ANTHROPIC_API_KEY e MESHY_API_KEY
+
+# CLI interattiva
+uv run models3d run "idea di partenza"
+
+# Web UI (FastAPI + HTMX, mobile-first)
+uv run models3d-web
+# default: 0.0.0.0:8000 — esponi via Tailscale/Cloudflare Tunnel per accesso mobile remoto
 ```
+
+Aggiunta dipendenze: `uv add <pkg>` (runtime) o `uv add --group dev <pkg>` (dev). `pyproject.toml` + `uv.lock` sono la fonte di verità — niente `pip install` manuale.
 
 Dipendenze esterne non-pip:
 - **Blender** (opzionale ma molto consigliato). Cercato in `/Applications/Blender.app/Contents/MacOS/Blender` o sul `$PATH`. Serve per i pass headless `print3d_clean_non_manifold` (richiede l'estensione "3D-Print Toolbox" installata in Blender, una tantum) e per il **Voxel Remesh** finale che garantisce manifold/watertight.
 - Senza Blender la pipeline gira ugualmente ma può produrre mesh che Bambu rifiuta.
 
+## Web UI (FastAPI + HTMX, mobile-first)
+
+Avvio: `uv run models3d-web` (default `0.0.0.0:8000`). Single-user, no auth — pensata per accesso da remoto via tunnel (Tailscale, Cloudflare Tunnel, ngrok). Niente Node/JS toolchain: Tailwind via CDN, HTMX + estensione SSE, `<model-viewer>` di Google per il preview 3D inline.
+
+Variabili d'ambiente specifiche:
+- `MODELS3D_HOST` (default `0.0.0.0`), `MODELS3D_PORT` (default `8000`), `MODELS3D_RELOAD=1` per auto-reload in dev.
+- `MODELS3D_MAX_WORKERS` (default `4`): worker thread del `ThreadPoolExecutor` per i job background.
+
+Architettura:
+- `src/web/app.py`: factory FastAPI + lifespan che istanzia `ThreadPoolExecutor` + `JobManager` shared via `app.state`.
+- `src/web/jobs.py`: `JobManager` registry in-memory dei task background. Ogni job ha `progress: int`, `log: list[str]`, `status: pending|running|done|failed`. Iniezione automatica di `on_progress` e `on_step` callback nelle funzioni target via introspection (`inspect.signature`).
+- `src/web/routes/`: sessions, iterations, events (SSE), files (serve session dir).
+- `src/web/templates/`: Jinja2 mobile-first.
+
+Endpoint principali:
+- `GET /` — lista sessioni (con auto-refresh HTMX ogni 5s).
+- `POST /sessions` — multipart con `idea` + `references[]`. Crea la session dir **sincronamente** (~10ms) e enqueue il job di image-gen, poi redirect a `/sessions/{id}`.
+- `GET /sessions/{id}` — pagina dettaglio con iterazioni, form feedback, bottone accept, eventuale 3D viewer.
+- `POST /sessions/{id}/feedback` — enqueue rigenerazione immagine.
+- `POST /sessions/{id}/accept` — enqueue pipeline 3D completa.
+- `GET /events/{job_id}` — SSE: stream di HTML fragments di `_job_progress_inner.html` ad ogni progress/log update.
+- `GET /events/sessions/{id}` — SSE livello sessione: emette `iteration_added` / `3d_ready` alla fine del job attivo.
+
+Concorrenza & sicurezza:
+- `storage.update_metadata()` thread-safe (RLock per-sessione + atomic write via `tmp + os.replace()`).
+- `meshy_client.*` accetta `api_key` esplicito (no mutazione globale `config.MESHY_API_KEY` in contesto web).
+- `mesh_repair.repair/decimate/flatten_base` accettano `on_step` opzionale per progress SSE granulare (label tipo `flatten 4/8: Blender print3d_clean_non_manifold`).
+- File serving con check path traversal (`Path(path).parts` non deve contenere `..`, e `full.resolve().relative_to(session.resolve())` deve riuscire).
+- Niente auth: la sicurezza è demandata al tunnel. Non esporre il porto direttamente su rete pubblica.
+
 ## CLI
 
-Entry point: `python -m src.main`. Modalità interattiva (default) o sub-comandi per non-interattiva.
+Entry point: `uv run models3d` (o `uv run python -m src.main`). Modalità interattiva (default) o sub-comandi per non-interattiva.
 
 | Sub-comando | Cosa fa |
 |---|---|

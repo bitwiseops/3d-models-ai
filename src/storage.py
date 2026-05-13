@@ -1,6 +1,8 @@
 import json
+import os
 import re
 import shutil
+import threading
 import unicodedata
 from datetime import datetime
 from pathlib import Path
@@ -8,6 +10,23 @@ from pathlib import Path
 import requests
 
 from . import config
+
+# Per-session reentrant lock per serializzare read-modify-write su metadata.json.
+# RLock (non asyncio.Lock) perché update_metadata è chiamato sia da CLI sync
+# che da worker thread del JobManager (entrambi sync context).
+_session_locks: dict[Path, threading.RLock] = {}
+_locks_guard = threading.Lock()
+
+
+def _get_lock(session: Path) -> threading.RLock:
+    """Lazy creation di un lock per-sessione. Thread-safe self."""
+    key = session.resolve()
+    with _locks_guard:
+        lock = _session_locks.get(key)
+        if lock is None:
+            lock = threading.RLock()
+            _session_locks[key] = lock
+        return lock
 
 
 def _slugify(text: str, max_len: int = 40) -> str:
@@ -78,14 +97,31 @@ def save_3d_from_url(session: Path, fmt: str, url: str) -> Path:
 
 
 def update_metadata(session: Path, **patch) -> None:
+    """Patch read-modify-write su metadata.json, atomico e thread-safe.
+
+    Atomicità: scrive prima su `metadata.json.tmp` e poi `os.replace()` →
+    su POSIX e Windows è una rename atomica, quindi il file non viene mai
+    visto in stato parziale anche se il processo crasha mid-write.
+
+    Thread-safety: tutto il read-modify-write sotto _get_lock(session).
+    """
     path = session / "metadata.json"
-    data = json.loads(path.read_text(encoding="utf-8"))
-    for k, v in patch.items():
-        if k == "append_iteration":
-            data["iterations"].append(v)
-        elif k == "add_credits":
-            for bucket, amount in v.items():
-                data["credits"][bucket] = data["credits"].get(bucket, 0) + amount
-        else:
-            data[k] = v
-    path.write_text(json.dumps(data, indent=2, ensure_ascii=False), encoding="utf-8")
+    tmp = path.with_suffix(".json.tmp")
+    with _get_lock(session):
+        data = json.loads(path.read_text(encoding="utf-8"))
+        for k, v in patch.items():
+            if k == "append_iteration":
+                data["iterations"].append(v)
+            elif k == "add_credits":
+                for bucket, amount in v.items():
+                    data["credits"][bucket] = data["credits"].get(bucket, 0) + amount
+            else:
+                data[k] = v
+        tmp.write_text(json.dumps(data, indent=2, ensure_ascii=False), encoding="utf-8")
+        os.replace(tmp, path)
+
+
+def load_metadata(session: Path) -> dict:
+    """Legge metadata.json sotto lock (consistent con writer concorrenti)."""
+    with _get_lock(session):
+        return json.loads((session / "metadata.json").read_text(encoding="utf-8"))
