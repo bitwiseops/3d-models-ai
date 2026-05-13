@@ -1,0 +1,13 @@
+anthropic>=0.40
+requests>=2.32
+python-dotenv>=1.0
+pillow>=10
+trimesh[easy]>=4
+pymeshfix>=0.17
+pymeshlab>=2023.12
+lxml>=5
+networkx>=3
+fast-simplification>=0.1
+scipy>=1.13
+shapely>=2
+rtree>=1.3
