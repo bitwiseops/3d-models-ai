@@ -22,7 +22,7 @@ from pathlib import Path
 
 import requests
 
-from . import config, grid_utils, meshy_client, prompt_refiner, storage
+from . import config, grid_utils, mesh_repair, meshy_client, prompt_refiner, storage, usage as usage_mod
 
 PORTRAIT_ROOT = config.OUTPUTS_ROOT / "portraits"
 
@@ -101,7 +101,13 @@ def _run_multi_view(
     api_key: str | None,
 ) -> tuple[list[Path], str, int, str]:
     """Branch A: Meshy native multi-view → 3 immagini separate."""
-    refined = prompt_refiner.refine_portrait(user_prompt, reference)
+    def _on_claude(model: str, inp: int, out: int) -> None:
+        update_metadata(
+            portrait_dir,
+            add_claude_usage={"model": model, "input_tokens": inp, "output_tokens": out},
+        )
+    with usage_mod.session_scope(_on_claude):
+        refined = prompt_refiner.refine_portrait(user_prompt, reference)
     (portrait_dir / "prompts" / "01_refined_multi.txt").write_text(refined, encoding="utf-8")
     update_metadata(portrait_dir, refined_prompt_multi=refined)
     print(f"[portraits] [multi] Meshy image-to-image (native multi-view)…")
@@ -142,7 +148,13 @@ def _run_grid(
     api_key: str | None,
 ) -> tuple[list[Path], str, int, str]:
     """Branch B: prompt 2x2 grid → 1 immagine quadrata + 4 crop."""
-    refined = prompt_refiner.refine_portrait_grid(user_prompt, reference)
+    def _on_claude(model: str, inp: int, out: int) -> None:
+        update_metadata(
+            portrait_dir,
+            add_claude_usage={"model": model, "input_tokens": inp, "output_tokens": out},
+        )
+    with usage_mod.session_scope(_on_claude):
+        refined = prompt_refiner.refine_portrait_grid(user_prompt, reference)
     (portrait_dir / "prompts" / "01_refined_grid.txt").write_text(refined, encoding="utf-8")
     update_metadata(portrait_dir, refined_prompt_grid=refined)
     print(f"[portraits] [grid] Meshy image-to-image (2x2 grid prompt)…")
@@ -276,6 +288,7 @@ def list_portraits() -> list[dict]:
                 "created_at": meta.get("created_at", ""),
                 "status": meta.get("status", "draft"),
                 "thumb": thumb,
+                "cost_usd": usage_mod.session_cost_portrait(meta),
             }
         )
     out.sort(key=lambda x: x["created_at"], reverse=True)
@@ -315,5 +328,172 @@ def update_metadata(portrait_dir: Path, **patch) -> None:
         data = json.loads(
             (portrait_dir / "metadata.json").read_text(encoding="utf-8")
         )
+        cu_patch = patch.pop("add_claude_usage", None)
+        if cu_patch is not None:
+            cu = data.setdefault("claude_usage", {"by_model": {}})
+            bm = cu.setdefault("by_model", {})
+            m = bm.setdefault(cu_patch["model"], {"input_tokens": 0, "output_tokens": 0, "calls": 0})
+            m["input_tokens"] += int(cu_patch.get("input_tokens", 0))
+            m["output_tokens"] += int(cu_patch.get("output_tokens", 0))
+            m["calls"] += 1
+        bust_append = patch.pop("append_bust_run", None)
+        if bust_append is not None:
+            data.setdefault("bust_3d_runs", []).append(bust_append)
+        bust_patch = patch.pop("patch_bust_run", None)
+        if bust_patch is not None:
+            run_id = bust_patch.pop("run_id")
+            for r in data.get("bust_3d_runs", []):
+                if r.get("run_id") == run_id:
+                    r.update(bust_patch)
+                    break
         data.update(patch)
         _write_meta(portrait_dir, data)
+
+
+def next_bust_run_id(portrait_dir: Path) -> int:
+    """Calcola il prossimo run_id (max esistente + 1, partendo da 1)."""
+    with _get_lock(portrait_dir):
+        data = json.loads(
+            (portrait_dir / "metadata.json").read_text(encoding="utf-8")
+        )
+    runs = data.get("bust_3d_runs") or []
+    return max((int(r.get("run_id", 0)) for r in runs), default=0) + 1
+
+
+_BUST_TARGET_FORMATS = ("glb", "stl")
+
+
+def generate_bust_3d(
+    portrait_dir: Path,
+    run_id: int,
+    selected_rel_paths: list[str],
+    *,
+    enable_pbr: bool = False,
+    target_polycount: int = 300_000,
+    symmetry_mode: str | None = "auto",  # "off"|"auto"|"on"
+    crop_top_pct: float | None = 0.55,    # None = niente crop
+    on_progress=None,
+    on_step=None,
+    api_key: str | None = None,
+) -> dict:
+    """Genera un busto 3D a partire dalle immagini selezionate via Meshy
+    multi-image-to-3d. Output salvato in `portrait_dir/3d/run_NN/`.
+
+    Opzioni:
+    - `enable_pbr=False` (default): geometria pulita, no texture. Per stampa.
+    - `symmetry_mode="auto"` (default): Meshy decide; "on" forza simmetria
+      verticale (utile per visi); "off" disabilita.
+    - `crop_top_pct=0.55` (default): tiene il 55% superiore della bbox z →
+      mezzo busto. None per non croppare.
+    """
+    if not 1 <= len(selected_rel_paths) <= 4:
+        raise ValueError("selezione fuori range (1-4 immagini)")
+
+    run_dir = portrait_dir / "3d" / f"run_{run_id:02d}"
+    run_dir.mkdir(parents=True, exist_ok=True)
+
+    abs_paths = []
+    for rel in selected_rel_paths:
+        p = (portrait_dir / rel).resolve()
+        p.relative_to(portrait_dir.resolve())
+        if not p.exists():
+            raise FileNotFoundError(f"immagine selezionata mancante: {rel}")
+        abs_paths.append(p)
+    image_urls = [_data_uri(p) for p in abs_paths]
+
+    update_metadata(
+        portrait_dir,
+        patch_bust_run={
+            "run_id": run_id, "status": "running",
+            "options": {
+                "enable_pbr": enable_pbr,
+                "target_polycount": target_polycount,
+                "symmetry_mode": symmetry_mode,
+                "crop_top_pct": crop_top_pct,
+            },
+        },
+    )
+
+    if on_step: on_step(
+        f"Meshy multi-image-to-3d ({len(image_urls)} viste, "
+        f"PBR={'on' if enable_pbr else 'off'}, poly={target_polycount//1000}k, "
+        f"sym={symmetry_mode})…"
+    )
+    task_id = meshy_client.multi_image_to_3d(
+        image_urls=image_urls,
+        target_formats=_BUST_TARGET_FORMATS,
+        enable_pbr=enable_pbr,
+        target_polycount=target_polycount,
+        symmetry_mode=symmetry_mode,
+        api_key=api_key,
+    )
+    update_metadata(portrait_dir, patch_bust_run={"run_id": run_id, "task_id": task_id})
+
+    task = meshy_client.poll(
+        "/multi-image-to-3d",
+        task_id,
+        label=f"bust-3d-run-{run_id}",
+        max_wait=1800,
+        on_progress=on_progress,
+        api_key=api_key,
+    )
+
+    model_urls = task.get("model_urls", {})
+    saved: dict[str, str] = {}
+    for fmt in _BUST_TARGET_FORMATS:
+        url = model_urls.get(fmt)
+        if not url:
+            continue
+        out_path = run_dir / f"model.{fmt}"
+        import requests as _req
+        r = _req.get(url, timeout=300)
+        r.raise_for_status()
+        out_path.write_bytes(r.content)
+        saved[fmt] = str(out_path.relative_to(portrait_dir))
+
+    repaired_rel: dict[str, str] = {}
+    lowpoly_rel: dict[str, str] = {}
+    bust_rel: dict[str, str] = {}
+    src_stl = saved.get("stl") or saved.get("glb")
+    if src_stl:
+        try:
+            if on_step: on_step("repair watertight…")
+            repaired = mesh_repair.repair(
+                portrait_dir / src_stl, run_dir, on_step=on_step,
+            )
+            repaired_rel = {k: str(v.relative_to(portrait_dir)) for k, v in repaired.items()}
+            if "stl" in repaired:
+                if on_step: on_step("decimazione lowpoly…")
+                lowpoly = mesh_repair.decimate(
+                    repaired["stl"], run_dir,
+                    target_faces=mesh_repair.DEFAULT_TARGET_FACES,
+                    on_step=on_step,
+                )
+                lowpoly_rel = {k: str(v.relative_to(portrait_dir)) for k, v in lowpoly.items()}
+
+                if crop_top_pct is not None:
+                    try:
+                        if on_step: on_step(f"crop bust (top {int(crop_top_pct*100)}%)…")
+                        bust = mesh_repair.crop_bust(
+                            lowpoly["stl"], run_dir,
+                            keep_top_pct=crop_top_pct, on_step=on_step,
+                        )
+                        bust_rel = {k: str(v.relative_to(portrait_dir)) for k, v in bust.items()}
+                    except Exception as e:
+                        print(f"[portraits] crop_bust fallito: {e}")
+        except Exception as e:
+            print(f"[portraits] bust run #{run_id} repair/decimate fallito: {e}")
+
+    update_data = {
+        "status": "done",
+        "model_files": saved,
+        "repaired_files": repaired_rel,
+        "lowpoly_files": lowpoly_rel,
+        "bust_files": bust_rel,
+        "credits": int(task.get("consumed_credits", 0) or 0),
+    }
+    update_metadata(
+        portrait_dir,
+        patch_bust_run={"run_id": run_id, **update_data},
+    )
+    return update_data

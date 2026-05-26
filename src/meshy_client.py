@@ -139,6 +139,7 @@ def multi_image_to_3d(
     ai_model: str = config.MESHY_3D_MODEL,
     target_polycount: int = DEFAULT_TARGET_POLYCOUNT,
     should_remesh: bool = True,
+    symmetry_mode: str | None = None,  # "off" | "auto" | "on"
     api_key: str | None = None,
 ) -> str:
     """image_urls: 1–4 voci, ognuna URL pubblico o data URI base64.
@@ -146,6 +147,10 @@ def multi_image_to_3d(
     NB: `target_polycount` viene applicato solo se `should_remesh=True`.
     Meshy-6 ha `should_remesh=False` di default, quindi forziamo True per
     avere controllo sulla risoluzione e topologia uniforme.
+
+    `symmetry_mode`: se passato, forza la simmetria sull'asse verticale.
+    Utile per visi/busti. Valori: "off" (no), "auto" (Meshy decide),
+    "on" (forza). Omesso → Meshy usa il suo default.
     """
     body = {
         "image_urls": image_urls,
@@ -155,6 +160,8 @@ def multi_image_to_3d(
         "target_polycount": target_polycount,
         "should_remesh": should_remesh,
     }
+    if symmetry_mode is not None:
+        body["symmetry_mode"] = symmetry_mode
     r = requests.post(
         f"{config.MESHY_BASE}/multi-image-to-3d",
         json=body,

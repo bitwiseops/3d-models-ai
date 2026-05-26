@@ -7,7 +7,7 @@ from typing import Callable
 import numpy as np
 from PIL import Image
 
-from . import config, grid_utils, mesh_repair, meshy_client, prompt_refiner, storage
+from . import config, grid_utils, mesh_repair, meshy_client, prompt_refiner, storage, usage as usage_mod
 
 
 # STL per processing (single mesh fuso), GLB per preview <model-viewer> nella web UI.
@@ -221,9 +221,15 @@ def generate_first_iteration(
     """
     print("\n[1/3] Raffinamento prompt iniziale con Claude…")
     refiner_refs = _session_references(session)
-    prompt = prompt_refiner.refine_initial(
-        idea, references=refiner_refs if refiner_refs else None
-    )
+    def _on_claude(model: str, inp: int, out: int) -> None:
+        storage.update_metadata(
+            session,
+            add_claude_usage={"model": model, "input_tokens": inp, "output_tokens": out},
+        )
+    with usage_mod.session_scope(_on_claude):
+        prompt = prompt_refiner.refine_initial(
+            idea, references=refiner_refs if refiner_refs else None
+        )
     storage.save_prompt(session, 1, prompt)
     print(f"Prompt v1:\n{prompt}")
 
@@ -295,10 +301,16 @@ def continue_with_feedback(
         f"\nRaffinamento prompt con feedback "
         f"(use_previous_image={use_previous_image})…"
     )
-    new_prompt = prompt_refiner.refine_with_feedback(
-        idea, history, last_image, feedback,
-        use_previous_image=use_previous_image,
-    )
+    def _on_claude(model: str, inp: int, out: int) -> None:
+        storage.update_metadata(
+            session,
+            add_claude_usage={"model": model, "input_tokens": inp, "output_tokens": out},
+        )
+    with usage_mod.session_scope(_on_claude):
+        new_prompt = prompt_refiner.refine_with_feedback(
+            idea, history, last_image, feedback,
+            use_previous_image=use_previous_image,
+        )
     new_version = last["version"] + 1
     storage.save_prompt(session, new_version, new_prompt)
     print(f"Prompt v{new_version}:\n{new_prompt}")

@@ -8,12 +8,12 @@ from pathlib import Path
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, UploadFile
 from fastapi.responses import HTMLResponse, RedirectResponse
 
-from ... import storage, workflow
+from ... import storage, usage as usage_mod, workflow
 from ..deps import get_job_manager, get_outputs_root, resolve_session
 from ..jobs import JobManager
 from ..list_utils import group_by_day, parse_pagination, slice_with_more
 
-router = APIRouter()
+router = APIRouter(prefix="/sessions")
 
 
 def _list_sessions(outputs_root: Path) -> list[dict]:
@@ -45,13 +45,14 @@ def _list_sessions(outputs_root: Path) -> list[dict]:
                 "iterations": len(meta.get("iterations", [])),
                 "status": status,
                 "thumb": last_thumb,
+                "cost_usd": usage_mod.session_cost_meshy(meta),
             }
         )
     sessions.sort(key=lambda s: s["created_at"], reverse=True)
     return sessions
 
 
-def _sessions_page_context(outputs_root: Path, offset: int, limit: int) -> dict:
+def sessions_page_context(outputs_root: Path, offset: int, limit: int) -> dict:
     offset, limit = parse_pagination(offset, limit)
     all_items = _list_sessions(outputs_root)
     page, has_more, next_offset = slice_with_more(all_items, offset, limit)
@@ -64,20 +65,7 @@ def _sessions_page_context(outputs_root: Path, offset: int, limit: int) -> dict:
     }
 
 
-@router.get("/", response_class=HTMLResponse)
-async def index(
-    request: Request,
-    offset: int = 0,
-    limit: int = 20,
-    outputs_root: Path = Depends(get_outputs_root),
-) -> HTMLResponse:
-    templates = request.app.state.templates
-    return templates.TemplateResponse(
-        request, "index.html", _sessions_page_context(outputs_root, offset, limit),
-    )
-
-
-@router.get("/sessions", response_class=HTMLResponse)
+@router.get("", response_class=HTMLResponse)
 async def session_list_fragment(
     request: Request,
     offset: int = 0,
@@ -87,11 +75,11 @@ async def session_list_fragment(
     """Solo il fragment lista — usato da HTMX per refresh leggero."""
     templates = request.app.state.templates
     return templates.TemplateResponse(
-        request, "_session_list.html", _sessions_page_context(outputs_root, offset, limit),
+        request, "_session_list.html", sessions_page_context(outputs_root, offset, limit),
     )
 
 
-@router.post("/sessions")
+@router.post("")
 async def create_session(
     request: Request,
     idea: str = Form(...),
@@ -136,7 +124,7 @@ async def create_session(
     return RedirectResponse(url=f"{request.scope.get('root_path', '')}/sessions/{session_id}", status_code=303)
 
 
-@router.get("/sessions/{session_id}", response_class=HTMLResponse)
+@router.get("/{session_id}", response_class=HTMLResponse)
 async def session_detail(
     session_id: str,
     request: Request,
@@ -157,7 +145,7 @@ async def session_detail(
     )
 
 
-@router.get("/sessions/{session_id}/ab", response_class=HTMLResponse)
+@router.get("/{session_id}/ab", response_class=HTMLResponse)
 async def session_ab_compare(
     session_id: str,
     request: Request,
@@ -199,7 +187,7 @@ async def session_ab_compare(
     )
 
 
-@router.get("/sessions/{session_id}/fragment", response_class=HTMLResponse)
+@router.get("/{session_id}/fragment", response_class=HTMLResponse)
 async def session_fragment(
     session_id: str,
     request: Request,

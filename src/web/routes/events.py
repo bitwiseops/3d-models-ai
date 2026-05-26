@@ -24,7 +24,7 @@ def _render_job_fragment(request: Request, session_id: str, snapshot: dict) -> s
     """
     templates = request.app.state.templates
     kind = snapshot.get("kind")
-    if kind == "portrait":
+    if kind in ("portrait", "portrait_bust_3d"):
         tpl_name = "_portrait_progress_inner.html"
     elif kind == "scad":
         tpl_name = "_scad_progress_inner.html"
@@ -103,6 +103,8 @@ async def session_events(
                     event_type = "3d_ready"
                 elif kind == "portrait":
                     event_type = "portrait_ready"
+                elif kind == "portrait_bust_3d":
+                    event_type = "bust_3d_ready"
                 else:
                     event_type = "iteration_added"
                 yield {"event": event_type, "data": ""}

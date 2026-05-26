@@ -15,14 +15,16 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 
 import jinja2
-from fastapi import FastAPI
-from fastapi.responses import RedirectResponse
+from fastapi import Depends, FastAPI, Request
+from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
 from .. import config
+from .deps import get_outputs_root
 from .jobs import JobManager
 from .routes import events, files, iterations, portraits, scad, sessions, usage
+from .routes.sessions import sessions_page_context
 
 TEMPLATES_DIR = Path(__file__).parent / "templates"
 
@@ -86,10 +88,12 @@ def create_app() -> FastAPI:
     )
     env.globals["root_path"] = os.environ.get("ROOT_PATH", "")
     # Copy IT condivisa + classificatore errori → disponibili in tutti i template.
+    from .. import usage as usage_mod
     from .copy import C
     from .errors import classify as classify_error
     env.globals["C"] = C
     env.globals["classify_error"] = classify_error
+    env.globals["usage"] = usage_mod
     templates = Jinja2Templates(env=env)
     app.state.templates = templates
 
@@ -106,6 +110,17 @@ def create_app() -> FastAPI:
     assets_dir = config.PROJECT_ROOT / "assets"
     assets_dir.mkdir(parents=True, exist_ok=True)
     app.mount("/assets", StaticFiles(directory=str(assets_dir)), name="assets")
+
+    @app.get("/", response_class=HTMLResponse)
+    async def index(
+        request: Request,
+        offset: int = 0,
+        limit: int = 20,
+        outputs_root: Path = Depends(get_outputs_root),
+    ) -> HTMLResponse:
+        return request.app.state.templates.TemplateResponse(
+            request, "index.html", sessions_page_context(outputs_root, offset, limit),
+        )
 
     @app.get("/healthz")
     async def healthz():

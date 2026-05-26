@@ -60,6 +60,17 @@
              class="mt-2 w-full aspect-square object-contain rounded-lg bg-stone-100 dark:bg-stone-800">
       </details>
       {% endif %}
+      {% if it.image_paths_grid or it.clean_path or it.image_path %}
+      <form method="post"
+            action="{{ root_path }}/sessions/{{ session_id }}/iterations/{{ it.version }}/to_scad"
+            onsubmit="return confirm('{{ C.SCAD_FROM_ITERATION_CONFIRM }}');"
+            class="pt-2">
+        <button type="submit"
+                class="w-full rounded-lg border border-purple-300 dark:border-purple-800 bg-purple-50 dark:bg-purple-950/40 text-purple-800 dark:text-purple-200 px-4 py-2 text-sm font-medium hover:bg-purple-100 dark:hover:bg-purple-950 min-h-11">
+          {{ C.SCAD_FROM_ITERATION_LABEL }}
+        </button>
+      </form>
+      {% endif %}
     </div>
   </li>
   {% endfor %}

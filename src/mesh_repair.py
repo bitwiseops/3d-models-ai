@@ -487,6 +487,56 @@ def decimate(
     return out
 
 
+def crop_bust(
+    mesh_path: Path,
+    out_dir: Path,
+    keep_top_pct: float = 0.55,
+    suffix: str = "bust",
+    *,
+    on_step: StepCallback = None,
+) -> dict[str, Path]:
+    """Taglia il mesh con un piano orizzontale per mantenere solo la porzione
+    superiore (mezzo busto): `keep_top_pct` è la frazione dell'altezza
+    bbox tenuta dall'alto verso il basso. Default 55% → testa + collo + spalle
+    + porzione superiore del torace; il resto (torso/gambe/jeans) eliminato.
+
+    Tappa la sezione di taglio per ottenere un mesh watertight con base piatta.
+    Esporta `model_{suffix}.{stl,3mf}` in `out_dir`.
+    """
+    _emit(on_step, f"crop bust: caricamento {mesh_path.name}")
+    print(f"[crop_bust] caricamento {mesh_path.name}…")
+    mesh = trimesh.load(str(mesh_path), force="mesh", process=True)
+    if not isinstance(mesh, trimesh.Trimesh):
+        raise RuntimeError(f"Atteso Trimesh, ottenuto {type(mesh).__name__}")
+    z_min, z_max = float(mesh.bounds[0][2]), float(mesh.bounds[1][2])
+    height = z_max - z_min
+    # Taglio orizzontale a (z_max - keep_top_pct * height): tutto sopra resta.
+    cut_z = z_max - keep_top_pct * height
+    _emit(on_step, f"crop bust: taglio z={cut_z:.2f} (keep top {keep_top_pct*100:.0f}%)")
+    print(f"[crop_bust] bbox z=[{z_min:.2f}, {z_max:.2f}] h={height:.2f} → cut_z={cut_z:.2f}")
+
+    # `slice_plane` taglia + tappa la sezione (cap=True) → watertight.
+    cut = mesh.slice_plane(
+        plane_origin=[0, 0, cut_z],
+        plane_normal=[0, 0, 1],
+        cap=True,
+    )
+    if cut is None or len(cut.faces) == 0:
+        raise RuntimeError(f"slice_plane ha eliminato tutto il mesh (cut_z={cut_z})")
+    print(f"[crop_bust] post-cut    → {_stats(cut)}")
+    trimesh.repair.fix_normals(cut)
+    trimesh.repair.fill_holes(cut)
+
+    out: dict[str, Path] = {}
+    for fmt in ("stl", "3mf"):
+        path = out_dir / f"model_{suffix}.{fmt}"
+        cut.export(str(path))
+        out[fmt] = path
+        size_mb = path.stat().st_size / (1024 * 1024)
+        print(f"[crop_bust] esportato {fmt.upper()}: {path.name} ({size_mb:.1f} MB)")
+    return out
+
+
 def flatten_base(
     mesh_path: Path,
     out_dir: Path,

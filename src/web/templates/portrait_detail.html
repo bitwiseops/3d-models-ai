@@ -19,6 +19,12 @@
   <p class="text-xs text-stone-500 dark:text-stone-400">creato {{ meta.created_at }}</p>
 </section>
 
+<section class="mt-3">
+  {% with cb = usage.breakdown_portrait(meta) %}
+    {% include "_cost_report.html" %}
+  {% endwith %}
+</section>
+
 {% if meta.reference %}
 <section class="mt-4">
   <p class="text-xs font-medium text-stone-500 dark:text-stone-400 mb-2 uppercase tracking-wide">Reference</p>
@@ -38,11 +44,11 @@
          id="portrait-result-wrapper"
          hx-ext="sse"
          sse-connect="{{ root_path }}/events/sessions/{{ portrait_id }}"
-         sse-swap="portrait_ready"
+         sse-swap="portrait_ready,bust_3d_ready"
          hx-get="{{ root_path }}/portraits/{{ portrait_id }}/fragment"
-         hx-trigger="sse:portrait_ready"
+         hx-trigger="sse:portrait_ready,sse:bust_3d_ready"
          hx-swap="innerHTML">
-  {% include "_portrait_result.html" %}
+  {% include "_portrait_full.html" %}
 </section>
 
 {# Action bar: visibile solo se c'è almeno un output e non è in elaborazione. #}

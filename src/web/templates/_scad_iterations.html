@@ -50,12 +50,15 @@
 {% macro validation_badge(v) %}
 {% if v %}
   {% set warns = v.warnings or [] %}
+  {% set infos = v.infos or [] %}
   {% if v.auto_fixed %}
     <span class="inline-flex items-center text-[10px] text-amber-700 dark:text-amber-300 bg-amber-50 dark:bg-amber-950/40 rounded-full px-1.5 py-0.5">⚙ fix</span>
   {% elif not v.is_manifold %}
     <span class="inline-flex items-center text-[10px] text-red-700 dark:text-red-300 bg-red-50 dark:bg-red-950/40 rounded-full px-1.5 py-0.5">✕ broken</span>
   {% elif warns %}
     <span class="inline-flex items-center text-[10px] text-amber-700 dark:text-amber-300 bg-amber-50 dark:bg-amber-950/40 rounded-full px-1.5 py-0.5">⚠ {{ warns|length }}</span>
+  {% elif infos %}
+    <span class="inline-flex items-center text-[10px] text-yellow-700 dark:text-yellow-300 bg-yellow-50 dark:bg-yellow-950/40 rounded-full px-1.5 py-0.5">i {{ infos|length }}</span>
   {% else %}
     <span class="inline-flex items-center text-[10px] text-emerald-700 dark:text-emerald-300 bg-emerald-50 dark:bg-emerald-950/40 rounded-full px-1.5 py-0.5">✓ ok</span>
   {% endif %}
@@ -92,20 +95,24 @@
     {% endif %}
     {% if p.validation %}
     {% set v = p.validation %}
-    {% set is_problem = (v.warnings or []) or v.auto_fixed or not v.is_manifold %}
-    <details class="text-[10px] mt-1 {% if is_problem %}text-amber-700 dark:text-amber-300{% else %}text-stone-500 dark:text-stone-400{% endif %}">
+    {% set warns = v.warnings or [] %}
+    {% set infos = v.infos or [] %}
+    {% set is_problem = warns or v.auto_fixed or not v.is_manifold %}
+    {% set has_info = infos and not is_problem %}
+    <details class="text-[10px] mt-1 {% if is_problem %}text-amber-700 dark:text-amber-300{% elif has_info %}text-yellow-700 dark:text-yellow-300{% else %}text-stone-500 dark:text-stone-400{% endif %}">
       <summary class="cursor-pointer py-1 -my-1 select-none">
-        {% if is_problem %}{{ (v.warnings|length) + (1 if v.auto_fixed else 0) + (0 if v.is_manifold else 1) }} avvisi{% else %}validation{% endif %}
+        {% if is_problem %}{{ warns|length + (1 if v.auto_fixed else 0) + (0 if v.is_manifold else 1) }} avvisi{% elif has_info %}{{ infos|length }} info{% else %}validation{% endif %}
       </summary>
       <ul class="mt-1 space-y-0.5 list-disc list-inside leading-snug">
         {% if not v.is_manifold %}<li class="text-red-700 dark:text-red-300">non manifold (non riparato)</li>{% endif %}
         {% if v.auto_fixed %}<li>auto-riparato con pymeshfix</li>{% endif %}
-        {% for w in v.warnings %}<li>{{ w }}</li>{% endfor %}
+        {% for w in warns %}<li>{{ w }}</li>{% endfor %}
+        {% for i in infos %}<li class="text-yellow-700 dark:text-yellow-300">{{ i }}</li>{% endfor %}
       </ul>
       <p class="mt-1 text-stone-500 dark:text-stone-400">
         bbox {{ v.bbox_mm[0] }}×{{ v.bbox_mm[1] }}×{{ v.bbox_mm[2] }} mm
         {% if v.volume_mm3 %} · {{ "%.1f"|format(v.volume_mm3/1000) }} cm³{% endif %}
-        {% if v.min_thickness_mm is not none %} · wall ~{{ "%.2f"|format(v.min_thickness_mm) }} mm{% endif %}
+        {% set p5 = v.get('p5_thickness_mm') %}{% set mn = v.get('min_thickness_mm') %}{% if p5 is not none %} · wall p5 ~{{ "%.2f"|format(p5) }} mm{% if mn is not none %} (min {{ "%.2f"|format(mn) }}){% endif %}{% elif mn is not none %} · wall ~{{ "%.2f"|format(mn) }} mm{% endif %}
       </p>
     </details>
     {% endif %}
@@ -308,6 +315,7 @@
             {% for p in it.parts %}
             {% set v = p.validation or {} %}
             {% set warns = v.warnings or [] %}
+            {% set infos = v.infos or [] %}
             <li class="py-2 flex items-start gap-3">
               <div class="shrink-0 mt-0.5">{{ validation_badge(p.validation) }}</div>
               <div class="flex-1 min-w-0">
@@ -317,6 +325,10 @@
                   {% if not v.is_manifold %}<li>non manifold</li>{% endif %}
                   {% for w in warns %}<li>{{ w }}</li>{% endfor %}
                 </ul>
+                {% elif infos %}
+                <ul class="text-xs text-yellow-700 dark:text-yellow-300 mt-0.5 list-disc list-inside">
+                  {% for i in infos %}<li>{{ i }}</li>{% endfor %}
+                </ul>
                 {% else %}
                 <p class="text-xs text-stone-500 dark:text-stone-400">manifold, watertight, nei limiti.</p>
                 {% endif %}
@@ -324,7 +336,7 @@
                 <p class="text-[11px] text-stone-400 dark:text-stone-500">
                   {{ v.bbox_mm[0] }}×{{ v.bbox_mm[1] }}×{{ v.bbox_mm[2] }} mm
                   {% if v.volume_mm3 %} · {{ "%.1f"|format(v.volume_mm3/1000) }} cm³{% endif %}
-                  {% if v.min_thickness_mm is not none %} · wall ~{{ "%.2f"|format(v.min_thickness_mm) }} mm{% endif %}
+                  {% set p5 = v.get('p5_thickness_mm') %}{% set mn = v.get('min_thickness_mm') %}{% if p5 is not none %} · wall p5 ~{{ "%.2f"|format(p5) }} mm{% if mn is not none %} (min {{ "%.2f"|format(mn) }}){% endif %}{% elif mn is not none %} · wall ~{{ "%.2f"|format(mn) }} mm{% endif %}
                 </p>
                 {% endif %}
               </div>

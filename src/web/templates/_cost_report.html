@@ -1,0 +1,74 @@
+{# Mini report costo, apribile inline. Usa <details> nativo per non
+   introdurre JS. Passa `cb` = dict ritornato da usage.breakdown_*.
+
+   Schema atteso (kind == "mixed" o "scad"):
+   - meshy_lines:   [{label, credits, cost_usd}]      (solo "mixed")
+   - claude_lines:  [{label, input_tokens, output_tokens, cost_usd}]
+   - meshy_total_credits, meshy_total_usd, claude_total_usd, total_usd
+   - rate_note (string)
+#}
+<details class="text-xs text-stone-600 dark:text-stone-400 bg-stone-50 dark:bg-stone-800/40 rounded-lg border border-stone-200 dark:border-stone-800">
+  <summary class="cursor-pointer select-none px-3 py-2 flex items-center justify-between gap-2 min-h-9">
+    <span class="flex items-center gap-1.5">
+      <span aria-hidden="true">💰</span>
+      <span>Costo run</span>
+    </span>
+    <span class="font-medium tabular-nums text-stone-800 dark:text-stone-100">~${{ "%.4f"|format(cb.total_usd) }}</span>
+  </summary>
+  <div class="px-3 pb-3 pt-1 space-y-3 border-t border-stone-200 dark:border-stone-800">
+
+    {% if cb.meshy_lines is defined and cb.meshy_lines %}
+    <div>
+      <p class="text-[10px] uppercase tracking-wide text-stone-400 dark:text-stone-500 mb-1">Meshy</p>
+      <ul class="space-y-0.5">
+        {% for ln in cb.meshy_lines %}
+        <li class="flex items-center justify-between gap-2">
+          <span>{{ ln.label }}</span>
+          <span class="text-stone-400">{{ ln.credits }} cr</span>
+          <span class="tabular-nums w-20 text-right">~${{ "%.4f"|format(ln.cost_usd) }}</span>
+        </li>
+        {% endfor %}
+        {% if cb.meshy_lines|length > 1 %}
+        <li class="flex items-center justify-between gap-2 pt-1 mt-1 border-t border-stone-200 dark:border-stone-800 font-medium">
+          <span>subtotale</span>
+          <span class="text-stone-400">{{ cb.meshy_total_credits }} cr</span>
+          <span class="tabular-nums w-20 text-right">~${{ "%.4f"|format(cb.meshy_total_usd) }}</span>
+        </li>
+        {% endif %}
+      </ul>
+    </div>
+    {% endif %}
+
+    {% if cb.claude_lines %}
+    <div>
+      <p class="text-[10px] uppercase tracking-wide text-stone-400 dark:text-stone-500 mb-1">Claude</p>
+      <ul class="space-y-0.5">
+        {% for ln in cb.claude_lines %}
+        <li class="flex items-center justify-between gap-2">
+          <span class="truncate">{{ ln.label }}</span>
+          <span class="text-stone-400 tabular-nums">{{ "{:,}".format(ln.input_tokens) }}/{{ "{:,}".format(ln.output_tokens) }}</span>
+          <span class="tabular-nums w-20 text-right">~${{ "%.4f"|format(ln.cost_usd) }}</span>
+        </li>
+        {% endfor %}
+        {% if cb.claude_lines|length > 1 %}
+        <li class="flex items-center justify-between gap-2 pt-1 mt-1 border-t border-stone-200 dark:border-stone-800 font-medium">
+          <span>subtotale</span>
+          <span class="tabular-nums w-20 text-right">~${{ "%.4f"|format(cb.claude_total_usd) }}</span>
+        </li>
+        {% endif %}
+      </ul>
+    </div>
+    {% elif cb.kind != "scad" %}
+    <p class="text-[11px] text-stone-400 dark:text-stone-500 italic">Nessuna chiamata Claude tracciata per questa sessione (sessione vecchia o non ancora generata).</p>
+    {% endif %}
+
+    {% if cb.meshy_lines is defined and cb.meshy_lines and cb.claude_lines %}
+    <div class="pt-2 mt-1 border-t border-stone-200 dark:border-stone-800 flex items-center justify-between gap-2 font-medium text-stone-800 dark:text-stone-100">
+      <span>Totale</span>
+      <span class="tabular-nums">~${{ "%.4f"|format(cb.total_usd) }}</span>
+    </div>
+    {% endif %}
+
+    <p class="text-[10px] text-stone-400 dark:text-stone-500 pt-1">{{ cb.rate_note }}</p>
+  </div>
+</details>

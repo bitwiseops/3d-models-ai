@@ -12,7 +12,7 @@ from ..deps import get_job_manager
 from ..jobs import JobManager
 from ..list_utils import group_by_day, parse_pagination, slice_with_more
 
-router = APIRouter()
+router = APIRouter(prefix="/scad")
 
 _MEDIA_TYPES = {
     ".png": "image/png",
@@ -47,7 +47,7 @@ def _scad_page_context(offset: int = 0, limit: int = 20) -> dict:
     }
 
 
-@router.get("/scad", response_class=HTMLResponse)
+@router.get("", response_class=HTMLResponse)
 async def scad_index(
     request: Request, offset: int = 0, limit: int = 20,
 ) -> HTMLResponse:
@@ -57,7 +57,7 @@ async def scad_index(
     )
 
 
-@router.get("/scad/list", response_class=HTMLResponse)
+@router.get("/list", response_class=HTMLResponse)
 async def scad_list_fragment(
     request: Request, offset: int = 0, limit: int = 20,
 ) -> HTMLResponse:
@@ -67,7 +67,7 @@ async def scad_list_fragment(
     )
 
 
-@router.post("/scad")
+@router.post("")
 async def create_scad(
     request: Request,
     idea: str = Form(...),
@@ -129,7 +129,7 @@ def _load_inline_code(scad_dir: Path, meta: dict) -> dict[int, dict[str, str]]:
     return out
 
 
-@router.get("/scad/{scad_id}", response_class=HTMLResponse)
+@router.get("/{scad_id}", response_class=HTMLResponse)
 async def scad_detail(
     scad_id: str,
     request: Request,
@@ -151,7 +151,7 @@ async def scad_detail(
     )
 
 
-@router.get("/scad/{scad_id}/fragment", response_class=HTMLResponse)
+@router.get("/{scad_id}/fragment", response_class=HTMLResponse)
 async def scad_fragment(
     scad_id: str,
     request: Request,
@@ -173,7 +173,7 @@ async def scad_fragment(
     )
 
 
-@router.post("/scad/{scad_id}/feedback", response_class=HTMLResponse)
+@router.post("/{scad_id}/feedback", response_class=HTMLResponse)
 async def post_scad_feedback(
     scad_id: str,
     request: Request,
@@ -206,7 +206,7 @@ async def post_scad_feedback(
     )
 
 
-@router.post("/scad/{scad_id}/feedback_part", response_class=HTMLResponse)
+@router.post("/{scad_id}/feedback_part", response_class=HTMLResponse)
 async def post_scad_feedback_part(
     scad_id: str,
     request: Request,
@@ -264,7 +264,7 @@ def _synthesize_warning_feedback(validation: dict) -> str:
     return "\n".join(bits)
 
 
-@router.post("/scad/{scad_id}/fix_part", response_class=HTMLResponse)
+@router.post("/{scad_id}/fix_part", response_class=HTMLResponse)
 async def post_scad_fix_part(
     scad_id: str,
     request: Request,
@@ -306,7 +306,7 @@ async def post_scad_fix_part(
     )
 
 
-@router.post("/scad/{scad_id}/accept", response_class=RedirectResponse)
+@router.post("/{scad_id}/accept", response_class=RedirectResponse)
 async def post_scad_accept(
     scad_id: str,
     request: Request,
@@ -318,7 +318,7 @@ async def post_scad_accept(
     )
 
 
-@router.get("/scad/{scad_id}/files/{path:path}")
+@router.get("/{scad_id}/files/{path:path}")
 async def serve_scad_file(scad_id: str, path: str) -> FileResponse:
     scad_dir = _resolve_scad(scad_id)
     if path.startswith("/") or ".." in Path(path).parts:

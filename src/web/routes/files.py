@@ -8,7 +8,7 @@ from fastapi.responses import FileResponse
 
 from ..deps import resolve_session
 
-router = APIRouter()
+router = APIRouter(prefix="/sessions/{session_id}/files")
 
 # mimetypes di stdlib non conosce le estensioni 3D: serve mapping esplicito.
 # Senza questi <model-viewer> riceve text/plain e silenziosamente non carica.
@@ -21,7 +21,7 @@ _MEDIA_TYPES = {
 }
 
 
-@router.get("/sessions/{session_id}/files/{path:path}")
+@router.get("/{path:path}")
 async def serve_file(session_id: str, path: str, session: Path = Depends(resolve_session)) -> FileResponse:
     """Serve un file all'interno della session dir, con check di path traversal."""
     # Disallow absolute paths e parent traversal

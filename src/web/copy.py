@@ -33,6 +33,10 @@ class C:
     )
     PLACEHOLDER_FEEDBACK = "es. più alto, più sottile, smussa gli angoli"
 
+    # Shortcut Meshy → SCAD
+    SCAD_FROM_ITERATION_LABEL = "→ Genera SCAD da questa vista"
+    SCAD_FROM_ITERATION_CONFIRM = "Creare nuova sessione SCAD da questa iterazione?"
+
     # Status
     STATUS_DRAFT = "Bozza"
     STATUS_RUNNING = "In elaborazione"

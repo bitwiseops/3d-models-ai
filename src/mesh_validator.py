@@ -11,10 +11,13 @@ from typing import Any
 import numpy as np
 import trimesh
 
-# Soglia minima ragionevole per stampa FDM 0.4 mm nozzle.
+# Soglia minima HARD per stampa FDM 0.4 mm nozzle (sotto = rosso/warn).
 MIN_WALL_MM = 0.8
+# Soglia TARGET (sotto = info/giallo, oltre warn): allinearsi con scad.py
+# min_wall=1.5; teniamo 1.2 per non spammare info su bordi/lamelle ok.
+WARN_WALL_MM = 1.2
 BED_MM = 220.0
-SAMPLE_POINTS = 600  # per thickness probe — più alto = più preciso ma lento
+SAMPLE_POINTS = 1500  # più samples → p5 stabile, costo trascurabile (~0.3s)
 
 
 def _empty(warning: str) -> dict[str, Any]:
@@ -28,7 +31,9 @@ def _empty(warning: str) -> dict[str, Any]:
         "bbox_mm": None,
         "fits_bed_220": None,
         "min_thickness_mm": None,
+        "p5_thickness_mm": None,
         "warnings": [warning],
+        "infos": [],
         "auto_fixed": False,
     }
 
@@ -54,16 +59,18 @@ def _try_pymeshfix(stl_path: Path) -> bool:
         return False
 
 
-def _min_thickness(mesh: trimesh.Trimesh) -> float | None:
-    """Probe approssimata del minimo wall: per N punti random sulla superficie
+def _thickness_stats(mesh: trimesh.Trimesh) -> tuple[float | None, float | None]:
+    """Probe approssimata dello spessore: per N punti random sulla superficie
     si lancia un raggio interno e si misura la distanza alla prima intersezione
-    opposta. Robusto solo per geometrie chiuse; ritorna None se non valutabile."""
+    opposta. Ritorna `(min, p5)`: min è il valore peggiore (sensibile a edge
+    sfortunati), p5 è il 5° percentile (resistente agli outlier — è la metrica
+    affidabile per decidere il warning). Ritorna `(None, None)` se non valutabile."""
     if not mesh.is_watertight or len(mesh.faces) == 0:
-        return None
+        return None, None
     try:
         sample, face_idx = trimesh.sample.sample_surface_even(mesh, SAMPLE_POINTS)
         if len(sample) == 0:
-            return None
+            return None, None
         normals = mesh.face_normals[face_idx]
         # Spara raggi verso l'interno (lato opposto della normale).
         origins = sample - normals * 1e-3  # piccolo offset per evitare hit zero
@@ -72,17 +79,16 @@ def _min_thickness(mesh: trimesh.Trimesh) -> float | None:
             ray_origins=origins, ray_directions=directions, multiple_hits=False,
         )
         if len(locs) == 0:
-            return None
-        # Distanza dal punto-origine al punto-impatto.
+            return None, None
         hit_origins = origins[ray_idx]
         dists = np.linalg.norm(locs - hit_origins, axis=1)
         # Filtra zero-length (auto-intersezioni numeriche).
         dists = dists[dists > 1e-3]
         if len(dists) == 0:
-            return None
-        return float(np.min(dists))
+            return None, None
+        return float(np.min(dists)), float(np.percentile(dists, 5))
     except Exception:
-        return None
+        return None, None
 
 
 def validate(stl_path: Path, *, attempt_fix: bool = True) -> dict[str, Any]:
@@ -97,6 +103,7 @@ def validate(stl_path: Path, *, attempt_fix: bool = True) -> dict[str, Any]:
         return _empty(f"trimesh.load fallita: {e}")
 
     warnings: list[str] = []
+    infos: list[str] = []
     auto_fixed = False
 
     is_watertight = bool(mesh.is_watertight)
@@ -142,9 +149,21 @@ def validate(stl_path: Path, *, attempt_fix: bool = True) -> dict[str, Any]:
         if not fits_bed:
             warnings.append(f"supera piatto {int(BED_MM)}×{int(BED_MM)} mm (bbox {bbox[0]}×{bbox[1]})")
 
-    min_thick = _min_thickness(mesh) if is_manifold else None
-    if min_thick is not None and min_thick < MIN_WALL_MM:
-        warnings.append(f"wall minimo {min_thick:.2f} mm (sotto soglia {MIN_WALL_MM} mm)")
+    min_thick, p5_thick = _thickness_stats(mesh) if is_manifold else (None, None)
+    # Decisione basata su p5 (resistente a outlier su edge sfortunati): se il
+    # 5° percentile è sotto la soglia HARD → warning vero. Se è oltre la HARD
+    # ma sotto la TARGET → info (giallo soft, non bloccante).
+    if p5_thick is not None:
+        if p5_thick < MIN_WALL_MM:
+            warnings.append(
+                f"wall sotto soglia: p5 {p5_thick:.2f} mm < {MIN_WALL_MM} mm "
+                f"(min assoluto {min_thick:.2f} mm)"
+            )
+        elif p5_thick < WARN_WALL_MM:
+            infos.append(
+                f"wall borderline: p5 {p5_thick:.2f} mm < target {WARN_WALL_MM} mm "
+                f"(min assoluto {min_thick:.2f} mm) — stampabile ma fragile"
+            )
 
     try:
         euler = int(mesh.euler_number)
@@ -161,17 +180,21 @@ def validate(stl_path: Path, *, attempt_fix: bool = True) -> dict[str, Any]:
         "bbox_mm": bbox,
         "fits_bed_220": fits_bed,
         "min_thickness_mm": round(min_thick, 3) if min_thick is not None else None,
+        "p5_thickness_mm": round(p5_thick, 3) if p5_thick is not None else None,
         "warnings": warnings,
+        "infos": infos,
         "auto_fixed": auto_fixed,
     }
 
 
 def severity(validation: dict | None) -> str:
-    """Mappa il validation dict a un livello: 'ok', 'warn', 'fail'."""
+    """Mappa il validation dict a un livello: 'ok', 'info', 'warn', 'fail'."""
     if not validation:
         return "fail"
     if not validation.get("is_manifold"):
         return "fail"
     if validation.get("warnings"):
         return "warn"
+    if validation.get("infos"):
+        return "info"
     return "ok"

@@ -1,0 +1,93 @@
+{# Sezione "Busto 3D": lista run con viewer GLB + download. Renderizzata sia
+   nel detail sia ricaricata via SSE a fine job (bust_3d_ready). #}
+{% set runs = meta.bust_3d_runs or [] %}
+{% set bust_active = active_job and active_job.kind == 'portrait_bust_3d' %}
+
+{% if runs or bust_active %}
+<section class="space-y-3">
+  <h2 class="text-lg font-semibold">Busto 3D</h2>
+
+  {% if bust_active %}
+  <div>
+    {% include "_portrait_progress.html" %}
+  </div>
+  {% endif %}
+
+  <ol class="space-y-4">
+    {% for r in runs | reverse %}
+    {% set rid = r.run_id %}
+    {% set glb = (r.model_files or {}).get('glb') %}
+    {% set stl_raw = (r.model_files or {}).get('stl') %}
+    {% set stl_rep = (r.repaired_files or {}).get('stl') %}
+    {% set tmf_rep = (r.repaired_files or {}).get('3mf') %}
+    {% set stl_low = (r.lowpoly_files or {}).get('stl') %}
+    {% set tmf_low = (r.lowpoly_files or {}).get('3mf') %}
+    {% set stl_bust = (r.bust_files or {}).get('stl') %}
+    {% set tmf_bust = (r.bust_files or {}).get('3mf') %}
+    {% set opts = r.options or {} %}
+    <li class="bg-white dark:bg-stone-900 rounded-xl border border-stone-200 dark:border-stone-800 overflow-hidden">
+      <header class="px-4 py-2 flex items-center justify-between gap-2 bg-stone-50 dark:bg-stone-800/40 border-b border-stone-200 dark:border-stone-800">
+        <div class="flex items-center gap-2 min-w-0">
+          <span class="text-xs font-medium text-stone-500 dark:text-stone-400 uppercase">run #{{ rid }}</span>
+          {% if r.status == 'done' %}
+            <span class="text-[10px] text-emerald-700 dark:text-emerald-300 bg-emerald-50 dark:bg-emerald-950/40 rounded-full px-2 py-0.5">✓ pronto</span>
+          {% elif r.status == 'failed' %}
+            <span class="text-[10px] text-red-700 dark:text-red-300 bg-red-50 dark:bg-red-950/40 rounded-full px-2 py-0.5">✕ errore</span>
+          {% elif r.status == 'running' %}
+            <span class="text-[10px] text-amber-700 dark:text-amber-300 bg-amber-50 dark:bg-amber-950/40 rounded-full px-2 py-0.5">in corso</span>
+          {% else %}
+            <span class="text-[10px] text-stone-600 dark:text-stone-300 bg-stone-100 dark:bg-stone-800 rounded-full px-2 py-0.5">in coda</span>
+          {% endif %}
+        </div>
+        <span class="text-[11px] text-stone-400 dark:text-stone-500 tabular-nums">{{ r.created_at }}{% if r.credits %} · {{ r.credits }} cr{% endif %}</span>
+      </header>
+
+      {% if glb %}
+      <model-viewer src="{{ root_path }}/portraits/{{ portrait_id }}/files/{{ glb }}"
+                    camera-controls touch-action="pan-y" auto-rotate
+                    style="width:100%; height:min(55dvh, 480px); background:#f5f5f4;"></model-viewer>
+      {% elif r.status == 'failed' %}
+      <div class="p-4 text-sm text-red-700 dark:text-red-300 bg-red-50 dark:bg-red-950/40">
+        {{ r.error or 'Generazione fallita.' }}
+      </div>
+      {% elif r.status in ('queued', 'running') %}
+      <div class="p-6 text-sm text-stone-500 dark:text-stone-400 text-center">In elaborazione…</div>
+      {% endif %}
+
+      <div class="p-3 space-y-2">
+        {% if r.selected_images %}
+        <details class="text-xs text-stone-600 dark:text-stone-400">
+          <summary class="cursor-pointer py-1 -my-1 select-none">{{ r.selected_images|length }} viste usate</summary>
+          <div class="grid grid-cols-4 gap-1 mt-2">
+            {% for s in r.selected_images %}
+            <img src="{{ root_path }}/portraits/{{ portrait_id }}/files/{{ s }}"
+                 loading="lazy" decoding="async"
+                 class="w-full aspect-square object-contain rounded bg-stone-100 dark:bg-stone-800 border border-stone-200 dark:border-stone-800">
+            {% endfor %}
+          </div>
+        </details>
+        {% endif %}
+
+        {% if opts %}
+        <p class="text-[10px] text-stone-400 dark:text-stone-500">
+          opzioni: {{ opts.target_polycount//1000 if opts.target_polycount }}k poly · PBR {{ 'on' if opts.enable_pbr else 'off' }} · sym {{ opts.symmetry_mode or 'auto' }}{% if opts.crop_top_pct %} · crop {{ (opts.crop_top_pct*100)|int }}%{% endif %}
+        </p>
+        {% endif %}
+        {% if stl_rep or tmf_rep or stl_low or tmf_low or stl_raw or glb or stl_bust or tmf_bust %}
+        <div class="flex flex-wrap gap-2 pt-1">
+          {% if stl_bust %}<a href="{{ root_path }}/portraits/{{ portrait_id }}/files/{{ stl_bust }}" download class="inline-flex items-center rounded-lg border border-purple-300 dark:border-purple-700 bg-purple-50 dark:bg-purple-950/40 text-purple-800 dark:text-purple-200 text-xs px-2.5 py-1.5 hover:bg-purple-100 dark:hover:bg-purple-950 font-medium">⬇ STL (busto)</a>{% endif %}
+          {% if tmf_bust %}<a href="{{ root_path }}/portraits/{{ portrait_id }}/files/{{ tmf_bust }}" download class="inline-flex items-center rounded-lg border border-purple-300 dark:border-purple-700 bg-purple-50 dark:bg-purple-950/40 text-purple-800 dark:text-purple-200 text-xs px-2.5 py-1.5 hover:bg-purple-100 dark:hover:bg-purple-950 font-medium">⬇ 3MF (busto)</a>{% endif %}
+          {% if stl_rep %}<a href="{{ root_path }}/portraits/{{ portrait_id }}/files/{{ stl_rep }}" download class="inline-flex items-center rounded-lg border border-stone-300 dark:border-stone-700 text-xs px-2.5 py-1.5 hover:bg-stone-50 dark:hover:bg-stone-800">⬇ STL (repair)</a>{% endif %}
+          {% if tmf_rep %}<a href="{{ root_path }}/portraits/{{ portrait_id }}/files/{{ tmf_rep }}" download class="inline-flex items-center rounded-lg border border-stone-300 dark:border-stone-700 text-xs px-2.5 py-1.5 hover:bg-stone-50 dark:hover:bg-stone-800">⬇ 3MF (repair)</a>{% endif %}
+          {% if stl_low %}<a href="{{ root_path }}/portraits/{{ portrait_id }}/files/{{ stl_low }}" download class="inline-flex items-center rounded-lg border border-stone-300 dark:border-stone-700 text-xs px-2.5 py-1.5 hover:bg-stone-50 dark:hover:bg-stone-800">⬇ STL (lowpoly)</a>{% endif %}
+          {% if tmf_low %}<a href="{{ root_path }}/portraits/{{ portrait_id }}/files/{{ tmf_low }}" download class="inline-flex items-center rounded-lg border border-stone-300 dark:border-stone-700 text-xs px-2.5 py-1.5 hover:bg-stone-50 dark:hover:bg-stone-800">⬇ 3MF (lowpoly)</a>{% endif %}
+          {% if glb %}<a href="{{ root_path }}/portraits/{{ portrait_id }}/files/{{ glb }}" download class="inline-flex items-center rounded-lg border border-stone-300 dark:border-stone-700 text-xs px-2.5 py-1.5 hover:bg-stone-50 dark:hover:bg-stone-800">⬇ GLB raw</a>{% endif %}
+          {% if stl_raw and not stl_rep %}<a href="{{ root_path }}/portraits/{{ portrait_id }}/files/{{ stl_raw }}" download class="inline-flex items-center rounded-lg border border-stone-300 dark:border-stone-700 text-xs px-2.5 py-1.5 hover:bg-stone-50 dark:hover:bg-stone-800">⬇ STL raw</a>{% endif %}
+        </div>
+        {% endif %}
+      </div>
+    </li>
+    {% endfor %}
+  </ol>
+</section>
+{% endif %}

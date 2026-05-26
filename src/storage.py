@@ -115,6 +115,13 @@ def update_metadata(session: Path, **patch) -> None:
             elif k == "add_credits":
                 for bucket, amount in v.items():
                     data["credits"][bucket] = data["credits"].get(bucket, 0) + amount
+            elif k == "add_claude_usage":
+                cu = data.setdefault("claude_usage", {"by_model": {}})
+                bm = cu.setdefault("by_model", {})
+                m = bm.setdefault(v["model"], {"input_tokens": 0, "output_tokens": 0, "calls": 0})
+                m["input_tokens"] += int(v.get("input_tokens", 0))
+                m["output_tokens"] += int(v.get("output_tokens", 0))
+                m["calls"] += 1
             else:
                 data[k] = v
         tmp.write_text(json.dumps(data, indent=2, ensure_ascii=False), encoding="utf-8")

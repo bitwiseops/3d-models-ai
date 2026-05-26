@@ -86,6 +86,9 @@ Produci un PIANO di scomposizione, NON il codice. Il piano contiene:
 - Solo definizioni (assignments) e $fn, niente moduli e niente top-level calls.
 - Tutto in mm. Commenti brevi opzionali.
 - Niente `include`/`use`.
+- DEVI definire `min_wall = 1.5;` (mm) e `wall` ≥ `min_wall`. Ogni parete/guscio/
+  rib generato da QUALSIASI parte deve avere spessore ≥ `min_wall`. Se l'oggetto
+  ha pareti naturalmente sottili (es. tazza), comunque non scendere sotto 1.5 mm.
 </shared_scad_rules>
 
 <assembly_recipe_rules>
@@ -102,7 +105,7 @@ Rispondi SOLO con un fence ```json ... ``` contenente esattamente questa shape:
 ```json
 {
   "reasoning": "frase breve in italiano sulle scelte di scomposizione",
-  "shared_scad": "// shared parameters\\nwall = 2.5;\\nbody_w = 80;\\n$fn = 64;\\n",
+  "shared_scad": "// shared parameters\\nmin_wall = 1.5;\\nwall = 2.5;\\nbody_w = 80;\\n$fn = 64;\\n",
   "parts": [
     {"name": "body", "description": "scocca esterna trapezoidale con base piatta"},
     {"name": "knob", "description": "manopola cilindrica con base allargata"}
@@ -145,6 +148,21 @@ intersection_for, if, let, each, module, function.
 - Usa `$fn` adeguato (parti standard 64, piccoli dettagli 32, superfici di
   pregio 128).
 - Niente echo/assert di debug.
+- SPESSORI MINIMI (FDM 0.4 mm nozzle, vincolo HARD):
+  - Pareti continue ≥ `min_wall` (1.5 mm); usa `wall` (≥ `min_wall`) o un altro
+    nome derivato, MAI letterali sotto soglia.
+  - Per shell cilindrici/gusci usa il pattern `outer - inner` con
+    `inner_d = outer_d - 2*wall` (NON `2*min_wall`: lascia margine).
+  - Ribs, alette, lamelle decorative ≥ 1.2 mm (`min_wall - 0.3`); se servono
+    più sottili, omettile invece di farle fragili.
+  - Solette/base ≥ 1.5 mm (= 4 layers a 0.4 mm).
+  - Pin/peg di accoppiamento: diametro nominale ≥ 3 mm; clearance fori +0.3 mm
+    sul diametro (`hole_d = pin_d + 0.3`).
+  - Smussi e fillet non devono ridurre lo spessore locale sotto soglia: se un
+    `offset(r=-x)` o un `minkowski` con `r` grande assottiglia, alza la base o
+    cambia approccio.
+- VERIFICA MENTALE prima di chiudere: in ogni `difference()` calcola lo spessore
+  residuo (`outer - inner`) — deve essere ≥ `min_wall`. Se dubitoso, ingrossa.
 </hard_requirements>
 
 <common_pitfalls>
@@ -262,9 +280,45 @@ def _validate_plan(plan: dict) -> tuple[dict, list[str]]:
             norm_asm.append({"part": p["name"], "translate": [0, 0, 0], "rotate": [0, 0, 0]})
     plan["assembly"] = norm_asm
 
-    plan["shared_scad"] = (plan.get("shared_scad") or "").strip() or "$fn = 64;"
+    shared = (plan.get("shared_scad") or "").strip() or "$fn = 64;"
+    shared = _ensure_min_wall(shared)
+    plan["shared_scad"] = shared
     plan["reasoning"] = (plan.get("reasoning") or "").strip()
     return plan, warns
+
+
+_MIN_WALL_MM = 1.5  # tieni allineato con SCAD_PART_SYSTEM_PROMPT
+
+
+def _ensure_min_wall(shared: str) -> str:
+    """Garantisce che `shared_scad` contenga `min_wall` e che `wall` non scenda
+    sotto soglia. Best-effort via regex su singoli assignment scalari.
+
+    Casi:
+    - manca `min_wall` → lo aggiunge in cima.
+    - `min_wall` presente ma < soglia → riporta a soglia.
+    - `wall` presente ma < `min_wall` → riporta a `min_wall`.
+    """
+    has_min_wall = re.search(r"(?m)^\s*min_wall\s*=", shared) is not None
+
+    def _clamp_assignment(text: str, name: str, floor: float) -> str:
+        pat = re.compile(rf"(?m)^(\s*{name}\s*=\s*)([0-9]*\.?[0-9]+)(\s*;.*)$")
+        def repl(m: re.Match) -> str:
+            try:
+                v = float(m.group(2))
+            except ValueError:
+                return m.group(0)
+            if v < floor:
+                return f"{m.group(1)}{floor}{m.group(3)}"
+            return m.group(0)
+        return pat.sub(repl, text)
+
+    if has_min_wall:
+        shared = _clamp_assignment(shared, "min_wall", _MIN_WALL_MM)
+    else:
+        shared = f"min_wall = {_MIN_WALL_MM};  // hard floor FDM 0.4mm\n" + shared
+    shared = _clamp_assignment(shared, "wall", _MIN_WALL_MM)
+    return shared
 
 
 # --- Claude calls ---
@@ -1244,6 +1298,7 @@ def list_scad_sessions() -> list[dict]:
             "status": meta.get("status", "draft"),
             "accepted": meta.get("accepted_iteration"),
             "thumb": thumb,
+            "cost_usd": usage_tracker.session_cost_scad(meta),
         })
     out.sort(key=lambda x: x["created_at"], reverse=True)
     return out

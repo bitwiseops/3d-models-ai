@@ -54,52 +54,62 @@ OUTPUT
 - Una singola frase descrittiva densa, 40-80 parole, senza preamboli, senza virgolette, senza markdown, senza elenchi puntati."""
 
 
-OBJECT_GRID_SYSTEM_PROMPT = """Sei un prompt-engineer specializzato in immagini 2D che fanno da blueprint per ricostruzione image-to-3D di OGGETTI stampabili.
+# Staging block deterministico: layout 2x2, camera, lighting, sfondo, vincoli
+# fotografici. Costante — non viene riscritto da Claude ad ogni iterazione.
+# Il subject_block (variabile, raffinato da Claude) viene concatenato dopo.
+OBJECT_GRID_STAGING_BLOCK = (
+    "Studio product photography composed as a 2x2 grid on a square 1:1 canvas "
+    "(~2048x2048), four equal cells separated by a thin gutter the exact color "
+    "of the background; top-left is a near-frontal view tilted ~15 degrees off "
+    "axis, top-right is the same object rotated 45 degrees clockwise around the "
+    "vertical axis (three-quarter view), bottom-left is a pure 90-degree side "
+    "profile with the left flank toward the camera, bottom-right is a pure 180-"
+    "degree rear view (not a three-quarter from behind); identical scale, "
+    "camera height, distance, lighting, background and materials across all four "
+    "cells, bases aligned on the same horizontal line, the subject occupying "
+    "~70-80% of each cell, fully visible, never cropped. Long-tele lens "
+    "85-135mm equivalent to minimize perspective distortion, pure white "
+    "(#FFFFFF) or very light neutral-grey seamless studio background with no "
+    "gradient, no texture, no floor, no props; soft diffuse three-point lighting "
+    "(soft key + fill + gentle rim), only very faint contact shadows, no hard "
+    "cast shadows on background or under the object (hard shadows are read as "
+    "geometry by the 3D reconstructor); neutral exposure, no DOF, no bokeh, no "
+    "motion blur, no dutch tilt, no lens flare, no vignette. No labels, "
+    "captions, arrows, numbers, watermarks, decorative borders. The image will "
+    "be split into 4 separate views and fed to a multi-image-to-3D model as a "
+    "blueprint for 3D printing. Subject:"
+)
 
-PIPELINE DI USO DEL TUO PROMPT
-Il prompt che produci verrà passato a Meshy `nano-banana-pro` image-to-image (o text-to-image) SENZA multi-view: una singola chiamata, una singola immagine in output. Per ottenere comunque 4 viste, il tuo prompt DEVE chiedere esplicitamente una composizione 2x2 grid in cui ogni cella contiene una vista diversa dello stesso oggetto. Le 4 celle vengono poi ritagliate lato Python e passate a `multi-image-to-3d` come 4 viste indipendenti.
 
-LAYOUT IMMAGINE (OBBLIGATORIO)
-- Aspect ratio 1:1 (quadrato), massima risoluzione possibile (~2048x2048).
-- Composizione **2x2 grid** di 4 celle di pari dimensione, separate da un gutter sottile (~1-2% della larghezza) dello stesso colore esatto dello sfondo.
-- (top-left) FRONT view: oggetto rivolto frontalmente alla camera, vista ¾ leggera (~15° dall'asse) per dare profondità.
-- (top-right) THREE-QUARTER view: stesso oggetto ruotato ~45° in senso orario attorno all'asse verticale.
-- (bottom-left) PROFILE / SIDE view: stesso oggetto ruotato 90° (profilo puro, lato sinistro verso la camera).
-- (bottom-right) BACK view: stesso oggetto di spalle, vista posteriore pura (NON ¾ da dietro).
-- Tutte e 4 le celle: stesso identico oggetto, stessa scala, stessa altezza camera, stessa distanza, stessa illuminazione, stesso sfondo, stessi materiali. L'unica differenza è l'angolo di rotazione attorno all'asse verticale.
-- Nessuna etichetta "front/back" ecc., nessun numero, nessuna freccia, nessuna didascalia, nessun bordo decorativo.
+OBJECT_GRID_SYSTEM_PROMPT = """Sei un prompt-engineer specializzato nella DESCRIZIONE DEL SOGGETTO per immagini blueprint image-to-3D di OGGETTI stampabili.
 
-REGOLA CONCETTUALE FONDAMENTALE
-L'immagine deve essere una FOTOGRAFIA REALISTICA DA STUDIO dell'oggetto reale, NON un render 3D né un oggetto già stampato/modellato. Le condizioni che agevolano l'extraction 3D (sfondo neutro, luce diffusa, niente DOF) sono FOTOGRAFICHE, non stilizzazioni dell'oggetto.
-- NON aggiungere "low-poly", "3D render", "CGI", "stylized", "faceted surface", "miniature toy version", "3D printed look", "blender render", "polygonal facets" o simili, A MENO CHE l'utente non lo richieda esplicitamente.
-- L'output del modello 3D erediterà lo stile dell'immagine: se la foto è realistica, il 3D sarà realistico; se la foto è già low-poly, il 3D sarà low-poly e privo di dettaglio.
-- NON includere accessori legati all'uso finale (anelli per portachiavi, basi, fori per appendere, supporti, magneti, viti) salvo richiesta esplicita: l'oggetto dovrà essere il SOGGETTO puro, gli accessori si aggiungono in post-modeling.
+CONTESTO PIPELINE (non scrivere nulla a riguardo)
+Il tuo output verrà concatenato DOPO un blocco "staging" fisso che già definisce: layout 2x2 grid, 4 angoli di camera (front / three-quarter / side / back), studio neutro, lighting, lens, esclusioni di DOF / bokeh / ombre dure, etc. Quindi NON descrivere layout, griglia, camera, lighting, sfondo, lens, esposizione: sono GIÀ specificati. Limitati al SOGGETTO.
 
-INQUADRATURA / CAMERA (per ciascuna cella)
-- Oggetto singolo isolato, completamente visibile nella sua cella, occupa ~70-80% della cella, mai croppato.
-- Camera teleobiettivo lungo (~85-135mm equivalente) per minimizzare distorsione prospettica.
-- Niente angolazioni drammatiche, niente dutch tilt, niente motion blur, niente depth-of-field/bokeh.
-- Base/piede dell'oggetto sulla stessa quota verticale in tutte e 4 le celle.
+COSA DEVI SCRIVERE
+Una descrizione fisica densa e tangibile dell'oggetto che l'utente vuole, focalizzata su:
+- Forma generale e silhouette (es. "squat cylindrical body tapering to a flat top", "elongated teardrop with a flat base").
+- Proporzioni e rapporti dimensionali concreti (es. "height ~1.5x the diameter", "handle ~1/3 of body length", "wall thickness implied ~3mm").
+- Dettagli geometrici distintivi (curvature, smussi, spigoli vivi, scanalature, protrusioni, fori funzionali del soggetto stesso, simmetrie/asimmetrie).
+- Materiali espliciti e tangibili (es. "matte injection-molded ABS", "brushed anodized aluminum", "rough unglazed terracotta with visible throw lines", "weathered oak with open grain"): diventano texture/PBR nel 3D.
+- Palette colori dichiarata (es. "ivory body with cobalt-blue accents").
+- Posa stabile e neutra (poggiato, eretto), nessuna parte sospesa o autoocclusa pesantemente.
 
-SFONDO / LUCE
-- Sfondo studio uniforme bianco puro (#FFFFFF) o grigio neutro chiaro; nessun gradiente, texture, oggetti decorativi, pavimenti, riflessi.
-- Illuminazione diffusa a tre punti (soft key + fill + leggero rim), ombre morbide leggerissime, NESSUNA ombra dura proiettata sullo sfondo o sotto l'oggetto (le ombre dure verrebbero lette come geometria).
-- Esposizione neutra: niente high-key bruciato, niente silhouette, niente lens flare, niente vignettatura.
+REGOLA CONCETTUALE
+Descrivi l'oggetto come SOGGETTO FOTOGRAFATO REALMENTE, non come render 3D né come oggetto già stampato. NON usare "low-poly", "3D render", "CGI", "stylized", "miniature toy", "3D printed look", "polygonal facets", "blender render" — A MENO CHE l'utente non chieda esplicitamente quello stile. Se l'utente dice "fungo porcino" descrivi un fungo porcino reale, non una statuetta stilizzata.
 
-MATERIALI E GEOMETRIA
-- Specifica i materiali in modo esplicito e tangibile (es. "matte injection-molded plastic", "brushed anodized aluminum", "weathered oak wood with visible grain", "rough unglazed ceramic"): diventano texture e mappe PBR nel 3D.
-- Specifica proporzioni e rapporti dimensionali rilevanti (es. "stem about 1/3 of the cap height", "wall thickness ~2mm").
-- Evita materiali altamente riflettenti, trasparenti o subsurface (vetro liscio, acqua, pelle umana realistica) salvo necessità: confondono la stima della profondità.
-- Evita decorazioni 2D piatte sulla superficie (testi, loghi, decal) che il modello potrebbe interpretare come geometria in rilievo.
-- Posa stabile, oggetto poggiato in modo neutro; niente parti che si compenetrano o si auto-occludono pesantemente.
+NON INCLUDERE accessori legati all'uso finale (anelli per portachiavi, basi extra, fori per appendere, magneti, viti, supporti) salvo richiesta esplicita: il 3D dovrà contenere il SOGGETTO puro; ganci/forature vengono aggiunti dopo in post-modeling.
 
-DA ESCLUDERE SEMPRE
-- Persone, mani, scene, props, pavimenti texturizzati, sfondi paesaggistici, DOF, bokeh, lens flare, watermark, testo, frecce, didascalie, UI, frame/bordi decorativi.
-- Qualsiasi menzione contraria al layout: niente "single view", "isolated render", "turnaround animation".
+EVITA materiali altamente riflettenti, trasparenti o con subsurface scattering (vetro liscio, acqua, pelle umana realistica) salvo necessità: confondono la depth estimation. Se l'utente li chiede, traducili in equivalenti matte ("frosted matte glass, fully opaque").
+
+EVITA decorazioni 2D piatte (testi grandi, loghi, decal) sulla superficie: verrebbero lette come rilievi.
 
 OUTPUT
-- Rispondi SOLO con il prompt finale in INGLESE.
-- Una singola frase descrittiva densa, 80-130 parole, senza preamboli, senza virgolette, senza markdown, senza elenchi puntati. Deve menzionare esplicitamente: 2x2 grid 1:1, le 4 viste con i loro angoli precisi (front, three-quarter 45°, side profile 90°, back 180°), l'oggetto descritto dall'utente, i materiali, lo studio neutro, e che servirà come blueprint per stampa 3D."""
+- Rispondi SOLO con la descrizione del soggetto in INGLESE.
+- Una singola frase densa, 70-120 parole, senza preamboli, senza virgolette, senza markdown, senza elenchi puntati.
+- NON ripetere parole come "2x2 grid", "front view", "three-quarter", "side", "back", "studio background", "white background", "soft lighting", "85mm lens": appartengono allo staging e sarebbero duplicate.
+- Inizia direttamente con il soggetto (es. "A squat ceramic teapot ..." NON "An image showing a teapot ..." né "The subject is ...").
+- Termina con un punto."""
 
 
 def _client() -> Anthropic:
@@ -141,9 +151,10 @@ OBIETTIVO FINALE (sempre presente)
 L'immagine che descrivi sarà l'UNICO input visivo per uno step successivo di ricostruzione 3D del soggetto, destinato alla stampa 3D di una figurina. Ogni vincolo qui sotto NON è stilistico ma funzionale alla qualità della 3D extraction e della successiva stampa: dettagli non visibili, ombre dure, sfondi non neutri, elementi trasparenti, capelli con grosso volume aereo e accessori asimmetrici sono noti per produrre ricostruzioni rudimentali o errate (lo dichiarano esplicitamente le linee guida PrintU).
 
 INQUADRATURA (singolo soggetto)
-- UN SOLO soggetto isolato, in piedi, perfettamente centrato.
-- Framing DEFAULT: **mezzo busto / waist-up** — soggetto inquadrato dalla testa alla vita (poco sotto l'ombelico), con piccolo margine sopra la testa. NON è full-body se l'utente non lo chiede esplicitamente. Se l'utente specifica "full-body", "intera figura", "from head to toe", "tutto il corpo" o simili → allora estendere a full-body con piedi visibili.
-- Orizzonte camera all'altezza del torace/sterno, asse del corpo perfettamente verticale.
+- UN SOLO soggetto isolato, perfettamente centrato.
+- Framing DEFAULT: **HEAD-AND-SHOULDERS / mezzo busto stretto** — inquadratura dalla cima della testa fino a 5-10 cm SOTTO la clavicola (top of chest), tagliata appena sotto le ascelle. NON include braccia oltre il deltoide, NON include il petto centrale completo, NON include la vita. Spalle visibili e centrate. Margine ~10% sopra la testa, taglio netto sotto le clavicole.
+- Se e SOLO se l'utente specifica esplicitamente "waist-up", "mezzo busto", "fino alla vita", "full-body", "intera figura", "from head to toe", "tutto il corpo" → estendere di conseguenza.
+- Orizzonte camera all'altezza del mento/clavicola, asse del corpo perfettamente verticale.
 - Massima risoluzione possibile (l'obiettivo a valle è ~1000x1000 px utili per la 3D extraction).
 - NESSUNA menzione di "grid", "panels", "4 views", "turnaround", "front/back panels", "2x2", "cells", "gutter", "side-by-side": Meshy compone internamente, non deve essere chiesto dal prompt.
 - Nessuna etichetta, didascalia, freccia, bordo, frame, watermark.
@@ -186,7 +197,7 @@ DA ESCLUDERE SEMPRE
 
 OUTPUT
 - Rispondi SOLO con il prompt finale in INGLESE.
-- Una singola frase descrittiva densa, 60-100 parole, senza preamboli, senza virgolette, senza markdown, senza elenchi puntati. Deve menzionare esplicitamente: UN soggetto singolo, il framing (di default **waist-up / half-bust**; full-body solo se l'utente lo chiede), la posa (di default **arms relaxed along the sides**; A-pose solo se l'utente lo chiede), l'identità della persona dalla reference, lo studio neutro con soft 3-point lighting, materiali matte opachi, e il fatto che l'output servirà come blueprint per stampa 3D."""
+- Una singola frase descrittiva densa, 60-100 parole, senza preamboli, senza virgolette, senza markdown, senza elenchi puntati. Deve menzionare esplicitamente: UN soggetto singolo, il framing (di default **head-and-shoulders / tight bust crop just below the collarbone**; waist-up o full-body SOLO se l'utente lo chiede esplicitamente), la posa (di default **arms relaxed along the sides**; A-pose solo se l'utente lo chiede), l'identità della persona dalla reference, lo studio neutro con soft 3-point lighting, materiali matte opachi, e il fatto che l'output servirà come blueprint per stampa 3D."""
 
 
 PORTRAIT_GRID_SYSTEM_PROMPT = """Sei un prompt-engineer specializzato in immagini 2D che fanno da blueprint per ricostruzione image-to-3D di figure umane stampabili.
@@ -205,8 +216,8 @@ LAYOUT IMMAGINE (OBBLIGATORIO)
 - Nessuna etichetta "front/back" ecc., nessun numero, nessuna freccia, nessuna didascalia, nessun bordo decorativo.
 
 INQUADRATURA (per ciascuna cella)
-- Framing DEFAULT: **mezzo busto / waist-up** — dalla testa alla vita. Full-body (testa-piedi) SOLO se l'utente lo specifica esplicitamente.
-- Orizzonte camera all'altezza del torace/sterno, asse del corpo verticale.
+- Framing DEFAULT: **HEAD-AND-SHOULDERS / mezzo busto stretto** — dalla cima della testa fino a 5-10 cm sotto la clavicola, tagliato appena sotto le ascelle. NON include il petto centrale completo, NON include braccia oltre il deltoide, NON include la vita. Spalle centrate. Waist-up / full-body SOLO se l'utente lo specifica esplicitamente ("mezzo busto fino alla vita", "full-body", ecc.).
+- Orizzonte camera all'altezza del mento/clavicola, asse del corpo verticale.
 
 POSA
 - Posa DEFAULT: in piedi, simmetrica, **braccia rilassate lungo i fianchi**, spalle rilassate, busto eretto.
@@ -240,7 +251,7 @@ DA ESCLUDERE SEMPRE
 
 OUTPUT
 - Rispondi SOLO con il prompt finale in INGLESE.
-- Una singola frase descrittiva densa, 80-130 parole, senza preamboli, senza virgolette, senza markdown, senza elenchi puntati. Deve menzionare esplicitamente: 2x2 grid 1:1, le 4 viste con i loro angoli precisi, il framing (default waist-up; full-body solo se richiesto), la posa (default arms relaxed along sides), l'identità della persona dalla reference, lo studio neutro, e che servirà come blueprint per stampa 3D."""
+- Una singola frase descrittiva densa, 80-130 parole, senza preamboli, senza virgolette, senza markdown, senza elenchi puntati. Deve menzionare esplicitamente: 2x2 grid 1:1, le 4 viste con i loro angoli precisi, il framing (default **head-and-shoulders / tight bust crop just below the collarbone**; waist-up o full-body solo se richiesto esplicitamente), la posa (default arms relaxed along sides), l'identità della persona dalla reference, lo studio neutro, e che servirà come blueprint per stampa 3D."""
 
 
 def refine_portrait_grid(user_prompt: str, reference: Path) -> str:
@@ -255,7 +266,7 @@ def refine_portrait_grid(user_prompt: str, reference: Path) -> str:
                 "L'immagine qui sotto è la reference della persona. Produci il "
                 "prompt finale rispettando tutte le regole del system: una "
                 "singola immagine 1:1 con 4 viste in 2x2 grid, identica persona, "
-                "framing waist-up di default, braccia lungo i fianchi di default. "
+                "framing head-and-shoulders (tight bust crop) di default, braccia lungo i fianchi di default. "
                 "Servirà come blueprint per una successiva ricostruzione 3D."
             ),
         },
@@ -300,29 +311,46 @@ def refine_portrait(user_prompt: str, reference: Path) -> str:
     return resp.content[0].text.strip()
 
 
+def _compose_object_prompt(subject: str) -> str:
+    """Concatena staging (fisso) + subject (variabile) per Meshy."""
+    subject = subject.strip()
+    if not subject.endswith("."):
+        subject += "."
+    return f"{OBJECT_GRID_STAGING_BLOCK} {subject}"
+
+
+def _strip_staging(prompt: str) -> str:
+    """Rimuove lo staging block all'inizio di un prompt salvato in metadata,
+    in modo da passare a Claude solo il subject nell'history. Per iterazioni
+    legacy (pre-split) ritorna il prompt invariato."""
+    if prompt.startswith(OBJECT_GRID_STAGING_BLOCK):
+        return prompt[len(OBJECT_GRID_STAGING_BLOCK):].strip()
+    return prompt
+
+
 def refine_initial(idea: str, references: list[Path] | None = None) -> str:
     if not references:
         resp = _client().messages.create(
             model=config.ANTHROPIC_MODEL,
             max_tokens=1024,
             system=OBJECT_GRID_SYSTEM_PROMPT,
-            messages=[{"role": "user", "content": idea}],
+            messages=[{"role": "user", "content": f"Idea utente: {idea}"}],
         )
         usage.record_response("oggetti", resp)
-        return resp.content[0].text.strip()
+        return _compose_object_prompt(resp.content[0].text)
 
-    content = [
+    content: list[dict] = [
         {
             "type": "text",
             "text": (
-                f"Idea: {idea}\n\n"
-                "Le immagini qui sotto sono REFERENCE forniti dall'utente: "
-                "il prompt che produci deve guidare Nano Banana Pro a generare il "
-                "soggetto descritto dall'idea ISPIRANDOSI alle reference per stile, "
-                "proporzioni, palette, posa o materiali, ma DEVE comunque rispettare "
-                "tutte le regole di layout (2x2 grid 1:1 con front / 3-4 / side / back), "
-                "fotografia da studio, no accessori finali. Indica esplicitamente nel "
-                "prompt quali aspetti delle reference vanno preservati e quali adattati."
+                f"Idea utente: {idea}\n\n"
+                "Le immagini qui sotto sono REFERENCE fornite dall'utente: "
+                "descrivi il SOGGETTO ispirandoti alle reference per forma, "
+                "proporzioni, palette, materiali, dettagli distintivi — producendo "
+                "il soggetto descritto dall'idea (non una copia letterale delle "
+                "reference). Indica nella descrizione quali aspetti delle reference "
+                "stai preservando e quali stai adattando. Ricorda: SOLO il soggetto, "
+                "niente layout/camera/lighting (gestiti dallo staging fisso)."
             ),
         }
     ]
@@ -335,7 +363,7 @@ def refine_initial(idea: str, references: list[Path] | None = None) -> str:
         messages=[{"role": "user", "content": content}],
     )
     usage.record_response("oggetti", resp)
-    return resp.content[0].text.strip()
+    return _compose_object_prompt(resp.content[0].text)
 
 
 def refine_with_feedback(
@@ -356,7 +384,7 @@ def refine_with_feedback(
         messages.append(
             {
                 "role": "assistant",
-                "content": step["prompt"],
+                "content": _strip_staging(step["prompt"]),
             }
         )
         if use_previous_image:
@@ -382,15 +410,16 @@ def refine_with_feedback(
     if use_previous_image:
         final_text = (
             f"L'ultima immagine sopra non va bene. Feedback: {feedback}\n"
-            "Riscrivi il prompt tenendo conto del feedback e di cosa vedi nelle "
-            "immagini precedenti. Stesse regole del system."
+            "Riscrivi SOLO la descrizione del soggetto tenendo conto del feedback "
+            "e di cosa vedi nelle immagini precedenti. Stesse regole del system "
+            "(niente layout/camera/lighting, solo il soggetto)."
         )
     else:
         final_text = (
             f"Feedback dell'utente: {feedback}\n"
-            "Riscrivi il prompt tenendo conto del feedback e dei prompt precedenti. "
-            "Non hai visto le immagini generate: basati solo sul testo. "
-            "Stesse regole del system."
+            "Riscrivi SOLO la descrizione del soggetto tenendo conto del feedback "
+            "e delle descrizioni precedenti. Non hai visto le immagini generate: "
+            "basati solo sul testo. Stesse regole del system."
         )
     messages.append(
         {
@@ -405,4 +434,4 @@ def refine_with_feedback(
         messages=messages,
     )
     usage.record_response("oggetti", resp)
-    return resp.content[0].text.strip()
+    return _compose_object_prompt(resp.content[0].text)

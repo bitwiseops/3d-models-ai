@@ -14,7 +14,7 @@ from ..deps import get_job_manager
 from ..jobs import JobManager
 from ..list_utils import group_by_day, parse_pagination, slice_with_more
 
-router = APIRouter()
+router = APIRouter(prefix="/portraits")
 
 _MEDIA_TYPES = {
     ".png": "image/png",
@@ -44,7 +44,7 @@ def _portraits_page_context(offset: int, limit: int) -> dict:
     }
 
 
-@router.get("/portraits", response_class=HTMLResponse)
+@router.get("", response_class=HTMLResponse)
 async def portraits_index(
     request: Request, offset: int = 0, limit: int = 20,
 ) -> HTMLResponse:
@@ -54,7 +54,7 @@ async def portraits_index(
     )
 
 
-@router.get("/portraits/list", response_class=HTMLResponse)
+@router.get("/list", response_class=HTMLResponse)
 async def portraits_list_fragment(
     request: Request, offset: int = 0, limit: int = 20,
 ) -> HTMLResponse:
@@ -65,7 +65,7 @@ async def portraits_list_fragment(
     )
 
 
-@router.post("/portraits")
+@router.post("")
 async def create_portrait(
     request: Request,
     prompt: str = Form(default=""),
@@ -97,7 +97,7 @@ async def create_portrait(
     return RedirectResponse(url=f"{request.scope.get('root_path', '')}/portraits/{portrait_id}", status_code=303)
 
 
-@router.post("/portraits/{portrait_id}/regen")
+@router.post("/{portrait_id}/regen")
 async def regen_portrait(
     portrait_id: str,
     request: Request,
@@ -140,7 +140,101 @@ async def regen_portrait(
     )
 
 
-@router.get("/portraits/{portrait_id}", response_class=HTMLResponse)
+@router.post("/{portrait_id}/generate_bust_3d")
+async def generate_portrait_bust(
+    portrait_id: str,
+    request: Request,
+    selected_images: list[str] = Form(default=[]),
+    enable_pbr: str | None = Form(default=None),         # checkbox: "1" se on
+    target_polycount: int = Form(default=300_000),
+    symmetry_mode: str = Form(default="auto"),           # "off"|"auto"|"on"
+    crop_top_pct: int = Form(default=55),                # 0 = no crop, sennò % (1-100)
+    jm: JobManager = Depends(get_job_manager),
+) -> RedirectResponse:
+    """Lancia generazione 3D del busto a partire da N (1-4) immagini
+    selezionate. Ogni run salvata in `3d/run_NN/`."""
+    portrait_dir = _resolve_portrait(portrait_id)
+    cleaned: list[str] = []
+    for rel in selected_images:
+        if not rel or ".." in rel or rel.startswith("/"):
+            raise HTTPException(status_code=400, detail=f"path non valido: {rel}")
+        if not rel.startswith("images/"):
+            raise HTTPException(status_code=400, detail=f"path fuori da images/: {rel}")
+        full = (portrait_dir / rel).resolve()
+        try:
+            full.relative_to(portrait_dir.resolve())
+        except ValueError:
+            raise HTTPException(status_code=400, detail=f"path fuori dalla sessione: {rel}")
+        if not full.exists():
+            raise HTTPException(status_code=400, detail=f"immagine inesistente: {rel}")
+        cleaned.append(rel)
+    if not 1 <= len(cleaned) <= 4:
+        raise HTTPException(status_code=400, detail="seleziona da 1 a 4 immagini")
+    if jm.active_for_session(portrait_id) is not None:
+        raise HTTPException(status_code=409, detail="Job già in corso per questa sessione")
+
+    if target_polycount not in (50_000, 100_000, 300_000):
+        raise HTTPException(status_code=400, detail="polycount non supportato")
+    if symmetry_mode not in ("off", "auto", "on"):
+        raise HTTPException(status_code=400, detail="symmetry_mode non valido")
+    if not 0 <= crop_top_pct <= 100:
+        raise HTTPException(status_code=400, detail="crop_top_pct deve essere 0-100")
+
+    pbr_on = enable_pbr is not None
+    crop_pct = None if crop_top_pct == 0 else crop_top_pct / 100.0
+
+    from datetime import datetime
+    run_id = portraits.next_bust_run_id(portrait_dir)
+    portraits.update_metadata(
+        portrait_dir,
+        append_bust_run={
+            "run_id": run_id,
+            "status": "queued",
+            "selected_images": cleaned,
+            "created_at": datetime.now().strftime("%Y%m%d-%H%M%S"),
+            "task_id": None,
+            "credits": 0,
+            "model_files": {},
+            "repaired_files": {},
+            "lowpoly_files": {},
+            "bust_files": {},
+            "options": {
+                "enable_pbr": pbr_on,
+                "target_polycount": target_polycount,
+                "symmetry_mode": symmetry_mode,
+                "crop_top_pct": crop_pct,
+            },
+            "error": None,
+        },
+    )
+
+    api_key = request.app.state.meshy_api_key
+
+    def task() -> dict:
+        try:
+            return portraits.generate_bust_3d(
+                portrait_dir, run_id, cleaned,
+                enable_pbr=pbr_on,
+                target_polycount=target_polycount,
+                symmetry_mode=symmetry_mode,
+                crop_top_pct=crop_pct,
+                api_key=api_key,
+            )
+        except Exception as e:
+            portraits.update_metadata(
+                portrait_dir,
+                patch_bust_run={"run_id": run_id, "status": "failed", "error": str(e)},
+            )
+            raise
+
+    jm.submit(portrait_id, "portrait_bust_3d", task)
+    return RedirectResponse(
+        url=f"{request.scope.get('root_path', '')}/portraits/{portrait_id}",
+        status_code=303,
+    )
+
+
+@router.get("/{portrait_id}", response_class=HTMLResponse)
 async def portrait_detail(
     portrait_id: str,
     request: Request,
@@ -161,7 +255,7 @@ async def portrait_detail(
     )
 
 
-@router.get("/portraits/{portrait_id}/fragment", response_class=HTMLResponse)
+@router.get("/{portrait_id}/fragment", response_class=HTMLResponse)
 async def portrait_fragment(
     portrait_id: str,
     request: Request,
@@ -174,7 +268,7 @@ async def portrait_fragment(
     active_job = jm.active_for_session(portrait_id)
     return templates.TemplateResponse(
         request,
-        "_portrait_result.html",
+        "_portrait_full.html",
         {
             "portrait_id": portrait_id,
             "meta": meta,
@@ -183,7 +277,7 @@ async def portrait_fragment(
     )
 
 
-@router.get("/portraits/{portrait_id}/download.zip")
+@router.get("/{portrait_id}/download.zip")
 async def download_portrait_zip(portrait_id: str) -> StreamingResponse:
     """Zip in memoria con tutte le viste generate (multi + grid + reference)."""
     pdir = _resolve_portrait(portrait_id)
@@ -210,7 +304,7 @@ async def download_portrait_zip(portrait_id: str) -> StreamingResponse:
     )
 
 
-@router.get("/portraits/{portrait_id}/files/{path:path}")
+@router.get("/{portrait_id}/files/{path:path}")
 async def serve_portrait_file(portrait_id: str, path: str) -> FileResponse:
     portrait_dir = _resolve_portrait(portrait_id)
     if path.startswith("/") or ".." in Path(path).parts:
