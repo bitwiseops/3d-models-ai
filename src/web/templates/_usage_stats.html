@@ -1,0 +1,59 @@
+{% set sec_labels = {'oggetti': 'Oggetti', 'portraits': 'Portraits', 'scad': 'SCAD'} %}
+<div class="space-y-5">
+
+  {# --- Meshy balance live --- #}
+  <section>
+    <p class="text-xs uppercase tracking-wide text-stone-500 dark:text-stone-400 mb-2">Meshy · balance</p>
+    {% if meshy.ok %}
+      {% set raw = meshy.raw %}
+      <div class="rounded-xl border border-stone-200 dark:border-stone-800 bg-stone-50 dark:bg-stone-800/40 p-4">
+        <div class="flex items-baseline justify-between gap-3">
+          <span class="text-2xl font-semibold tabular-nums">
+            {{ raw.balance if raw.balance is defined else (raw.free_credits|default(0) + raw.paid_credits|default(0)) }}
+          </span>
+          <span class="text-xs text-stone-500 dark:text-stone-400">credits</span>
+        </div>
+        {% if raw.subscription is defined %}
+        <p class="text-xs text-stone-500 dark:text-stone-400 mt-1">plan: {{ raw.subscription }}</p>
+        {% endif %}
+        {% if raw.free_credits is defined or raw.paid_credits is defined %}
+        <p class="text-xs text-stone-500 dark:text-stone-400 mt-1">
+          free: {{ raw.free_credits|default(0) }} · paid: {{ raw.paid_credits|default(0) }}
+        </p>
+        {% endif %}
+      </div>
+    {% else %}
+      <div class="rounded-xl border border-amber-200 dark:border-amber-900 bg-amber-50 dark:bg-amber-950/40 p-3 text-xs text-amber-800 dark:text-amber-200">
+        Impossibile leggere il balance Meshy: {{ meshy.error }}
+      </div>
+    {% endif %}
+  </section>
+
+  {# --- Tracking locale Claude (per sezione di questa app) --- #}
+  <section>
+    <p class="text-xs uppercase tracking-wide text-stone-500 dark:text-stone-400 mb-2">Claude · tracking locale</p>
+    <div class="rounded-xl border border-stone-200 dark:border-stone-800 bg-stone-50 dark:bg-stone-800/40 p-4 space-y-3">
+      <div class="flex items-baseline justify-between gap-3">
+        <span class="text-2xl font-semibold tabular-nums">${{ "%.4f"|format(local.totals.cost_usd) }}</span>
+        <span class="text-xs text-stone-500 dark:text-stone-400">{{ local.totals.calls }} chiamate</span>
+      </div>
+      <p class="text-xs text-stone-500 dark:text-stone-400">
+        {{ "{:,}".format(local.totals.input_tokens) }} in · {{ "{:,}".format(local.totals.output_tokens) }} out
+      </p>
+      <div class="pt-2 border-t border-stone-200 dark:border-stone-800 space-y-1">
+        {% for key in ['oggetti', 'portraits', 'scad'] %}
+        {% set v = local.by_section.get(key, {'input_tokens': 0, 'output_tokens': 0, 'calls': 0, 'cost_usd': 0}) %}
+        <div class="flex items-center justify-between gap-3 text-sm">
+          <span class="text-stone-700 dark:text-stone-300">{{ sec_labels[key] }}</span>
+          <span class="text-xs text-stone-500 dark:text-stone-400 ml-auto">{{ v.calls }} call · {{ "{:,}".format(v.input_tokens) }}/{{ "{:,}".format(v.output_tokens) }}</span>
+          <span class="font-medium tabular-nums w-20 text-right">${{ "%.4f"|format(v.cost_usd) }}</span>
+        </div>
+        {% endfor %}
+      </div>
+    </div>
+  </section>
+
+  <p class="text-[11px] text-stone-400 dark:text-stone-500 text-center">
+    Local stima: Claude Opus 4.7 ($15/M in, $75/M out). Dati live: API ufficiali.
+  </p>
+</div>

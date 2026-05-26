@@ -17,11 +17,12 @@ from pathlib import Path
 import jinja2
 from fastapi import FastAPI
 from fastapi.responses import RedirectResponse
+from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
 from .. import config
 from .jobs import JobManager
-from .routes import events, files, iterations, sessions
+from .routes import events, files, iterations, portraits, scad, sessions, usage
 
 TEMPLATES_DIR = Path(__file__).parent / "templates"
 
@@ -57,7 +58,21 @@ def create_app() -> FastAPI:
         title="Models3D-AI Web UI",
         description="UI mobile-first per pipeline Meshy + Claude",
         lifespan=lifespan,
+        root_path=os.environ.get("ROOT_PATH", ""),
     )
+
+    @app.middleware("http")
+    async def attach_active_job(request, call_next):
+        """Inietta `request.state.active_job_global` per il progress pill
+        in base.html. Best-effort: se job_manager non è ancora attached
+        (avvio), salta silenziosamente."""
+        try:
+            jm = request.app.state.job_manager
+            active = jm.active_global()
+            request.state.active_job_global = active.snapshot() if active else None
+        except AttributeError:
+            request.state.active_job_global = None
+        return await call_next(request)
 
     # Environment Jinja2 esplicito con auto_reload=True (ricontrolla mtime
     # ad ogni render) e cache_size=0 (no cache compilata): cambiando un
@@ -69,6 +84,12 @@ def create_app() -> FastAPI:
         cache_size=0,
         autoescape=jinja2.select_autoescape(["html", "xml"]),
     )
+    env.globals["root_path"] = os.environ.get("ROOT_PATH", "")
+    # Copy IT condivisa + classificatore errori → disponibili in tutti i template.
+    from .copy import C
+    from .errors import classify as classify_error
+    env.globals["C"] = C
+    env.globals["classify_error"] = classify_error
     templates = Jinja2Templates(env=env)
     app.state.templates = templates
 
@@ -77,6 +98,14 @@ def create_app() -> FastAPI:
     app.include_router(iterations.router)
     app.include_router(events.router)
     app.include_router(files.router)
+    app.include_router(portraits.router)
+    app.include_router(scad.router)
+    app.include_router(usage.router)
+
+    # Static assets (HDR per model-viewer environment, ecc.)
+    assets_dir = config.PROJECT_ROOT / "assets"
+    assets_dir.mkdir(parents=True, exist_ok=True)
+    app.mount("/assets", StaticFiles(directory=str(assets_dir)), name="assets")
 
     @app.get("/healthz")
     async def healthz():

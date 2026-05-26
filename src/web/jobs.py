@@ -15,7 +15,7 @@ from concurrent.futures import Future, ThreadPoolExecutor
 from dataclasses import dataclass, field
 from typing import Any, AsyncIterator, Callable, Literal
 
-JobKind = Literal["image", "feedback", "accept"]
+JobKind = Literal["image", "feedback", "accept", "portrait", "scad"]
 JobStatus = Literal["pending", "running", "done", "failed"]
 
 
@@ -170,6 +170,13 @@ class JobManager:
         """Ritorna il job in corso (running/pending) per la sessione, se esiste."""
         for r in self._jobs.values():
             if r.session_id == session_id and r.status in ("pending", "running"):
+                return r
+        return None
+
+    def active_global(self) -> JobRecord | None:
+        """Ritorna il job in corso più recente, fra tutte le sessioni."""
+        for r in reversed(list(self._jobs.values())):
+            if r.status in ("pending", "running"):
                 return r
         return None
 

@@ -1,0 +1,44 @@
+{# Card errore actionable. Context atteso:
+   - err_title, err_msg, err_cta_kind (da errors.classify)
+   - err_raw: stack/stderr completo per il <details>
+   - retry_href / retry_method (opzionale)
+#}
+<div role="alert"
+     class="bg-red-50 dark:bg-red-950/40 border border-red-200 dark:border-red-900 rounded-xl p-4 text-sm text-red-800 dark:text-red-200 space-y-2">
+  <div class="flex items-start gap-2">
+    <span class="text-lg leading-none" aria-hidden="true">⚠</span>
+    <div class="flex-1 min-w-0">
+      <p class="font-semibold">{{ err_title }}</p>
+      <p class="text-xs text-red-700 dark:text-red-300 mt-0.5">{{ err_msg }}</p>
+    </div>
+  </div>
+  <div class="flex flex-wrap gap-2 pt-1">
+    {% if err_cta_kind == 'retry' and retry_href %}
+    <button hx-post="{{ retry_href }}"
+            hx-target="closest .scad-iter-mount, #job-progress-mount"
+            hx-swap="innerHTML"
+            class="inline-flex items-center gap-1 rounded-lg bg-red-700 dark:bg-red-600 text-white px-3 py-2 text-xs font-medium hover:bg-red-800 min-h-9 focus-visible:outline-2 focus-visible:outline-offset-2">
+      ↻ Riprova
+    </button>
+    {% elif err_cta_kind == 'stats' %}
+    <button type="button"
+            onclick="document.getElementById('usage-dialog').showModal()"
+            class="inline-flex items-center gap-1 rounded-lg bg-red-700 dark:bg-red-600 text-white px-3 py-2 text-xs font-medium hover:bg-red-800 min-h-9 focus-visible:outline-2 focus-visible:outline-offset-2">
+      📊 Apri statistiche
+    </button>
+    {% elif err_cta_kind == 'reupload' %}
+    <a href="javascript:history.back()"
+       class="inline-flex items-center gap-1 rounded-lg bg-red-700 dark:bg-red-600 text-white px-3 py-2 text-xs font-medium hover:bg-red-800 min-h-9 focus-visible:outline-2 focus-visible:outline-offset-2">
+      ← Torna indietro
+    </a>
+    {% endif %}
+    {% if err_raw %}
+    <details class="inline-block">
+      <summary class="cursor-pointer text-xs text-red-700 dark:text-red-300 px-2 py-2 underline">
+        log tecnico
+      </summary>
+      <pre class="mt-2 text-[10px] whitespace-pre-wrap leading-tight bg-red-100 dark:bg-red-950/60 border border-red-200 dark:border-red-900 rounded p-2 max-h-40 overflow-y-auto">{{ err_raw }}</pre>
+    </details>
+    {% endif %}
+  </div>
+</div>

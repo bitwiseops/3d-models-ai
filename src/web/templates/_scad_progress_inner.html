@@ -1,0 +1,37 @@
+{% if job.status == 'done' %}
+<div hx-get="{{ root_path }}/scad/{{ session_id }}/fragment"
+     hx-trigger="load delay:300ms"
+     hx-target="#scad-iterations-wrapper"
+     hx-swap="innerHTML"
+     class="bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-200 dark:border-emerald-900 rounded-xl p-4 text-sm text-emerald-800 dark:text-emerald-200">
+  ✓ Completato. Aggiorno…
+</div>
+{% elif job.status == 'failed' %}
+<div hx-get="{{ root_path }}/scad/{{ session_id }}/fragment"
+     hx-trigger="load delay:500ms"
+     hx-target="#scad-iterations-wrapper"
+     hx-swap="innerHTML">
+  {% set err = classify_error(job.error) %}
+  {% with err_title=err[1], err_msg=err[2], err_cta_kind=err[3], err_raw=job.error %}
+    {% include "_error_card.html" %}
+  {% endwith %}
+</div>
+{% else %}
+<div class="bg-white dark:bg-stone-900 border border-stone-300 dark:border-stone-700 rounded-xl shadow-sm p-3 sm:p-4 space-y-2">
+  <div class="flex items-center gap-2">
+    <span class="inline-block w-2.5 h-2.5 rounded-full border-2 border-amber-500 border-t-transparent spin"></span>
+    <span class="text-sm font-medium">{{ job.progress_status or 'generazione SCAD' }}</span>
+    <span class="ml-auto text-xs text-stone-500 dark:text-stone-400">{{ job.progress }}%</span>
+  </div>
+  <div class="h-1.5 w-full rounded-full bg-stone-200 dark:bg-stone-800 overflow-hidden">
+    <div class="h-full bg-amber-500 transition-all" style="width: {{ job.progress }}%"></div>
+  </div>
+  {% if job.log_tail %}
+  <details class="text-[10px] leading-tight text-stone-500 dark:text-stone-400">
+    <summary class="cursor-pointer text-stone-400 dark:text-stone-500 uppercase tracking-wide py-1 -my-1">log</summary>
+    <pre class="mt-1 max-h-24 overflow-y-auto overflow-x-auto whitespace-pre-wrap">{% for line in job.log_tail %}{{ line }}
+{% endfor %}</pre>
+  </details>
+  {% endif %}
+</div>
+{% endif %}

@@ -1,0 +1,35 @@
+{# Action bar condivisa: Rigenera / Conferma / Scarica.
+   Slot determinati dal context: si passa `regen_action`, `accept_action`,
+   `download_href`, `download_label` (tutti opzionali). Se assenti, il
+   bottone non viene reso. #}
+
+<section class="space-y-2 mt-4">
+  <div class="flex flex-wrap gap-2 items-stretch">
+    {% if regen_action %}
+    {# Può essere un href (apre dialog), un'azione HTMX, o un onclick JS. #}
+    {% if regen_action.get('dialog') %}
+    <button type="button"
+            onclick="{{ regen_action.dialog }}"
+            class="flex-1 min-w-[120px] inline-flex items-center justify-center gap-1 rounded-lg bg-stone-900 dark:bg-stone-100 text-white dark:text-stone-900 px-4 py-3 text-sm font-medium hover:bg-stone-800 dark:hover:bg-white min-h-11 focus-visible:outline-2 focus-visible:outline-offset-2">
+      {{ C.BTN_REGEN }}
+    </button>
+    {% endif %}
+    {% endif %}
+
+    {% if accept_action %}
+    <form method="post" action="{{ accept_action.href }}" class="flex-1 min-w-[120px]">
+      <button type="submit"
+              class="w-full inline-flex items-center justify-center gap-1 rounded-lg bg-emerald-600 text-white px-4 py-3 text-sm font-medium hover:bg-emerald-500 min-h-11 focus-visible:outline-2 focus-visible:outline-offset-2">
+        ✓ {{ accept_action.label or C.BTN_ACCEPT }}
+      </button>
+    </form>
+    {% endif %}
+
+    {% if download_href %}
+    <a href="{{ download_href }}" download
+       class="flex-1 min-w-[120px] inline-flex items-center justify-center gap-1 rounded-lg border border-stone-300 dark:border-stone-700 text-stone-700 dark:text-stone-200 px-4 py-3 text-sm font-medium hover:bg-stone-50 dark:hover:bg-stone-800 min-h-11 focus-visible:outline-2 focus-visible:outline-offset-2">
+      ⬇ {{ download_label or C.BTN_DOWNLOAD }}
+    </a>
+    {% endif %}
+  </div>
+</section>

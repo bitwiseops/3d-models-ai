@@ -1,0 +1,13 @@
+{# Toast singolo: auto-dismiss in 4s via CSS animation.
+   Context: msg, kind ('info'|'success'|'warning'|'error') #}
+{% set styles = {
+    'info':    'bg-stone-900 dark:bg-stone-100 text-white dark:text-stone-900',
+    'success': 'bg-emerald-600 text-white',
+    'warning': 'bg-amber-500 text-white',
+    'error':   'bg-red-600 text-white',
+} %}
+<div role="status"
+     class="toast {{ styles.get(kind or 'info') }} rounded-full px-4 py-2 text-sm font-medium shadow-lg pointer-events-auto"
+     style="animation: toast-life 4s ease-out forwards;">
+  {{ msg }}
+</div>

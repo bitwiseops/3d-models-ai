@@ -1,39 +1,41 @@
 {% extends "base.html" %}
 {% block title %}A/B 3D · {{ meta.idea }}{% endblock %}
-{% block header_actions %}
-<a href="/sessions/{{ session_id }}" class="text-sm text-stone-600 hover:text-stone-900">← Sessione</a>
+{% block header_nav %}
+<a href="{{ root_path }}/sessions/{{ session_id }}" class="text-sm text-stone-600 dark:text-stone-300 hover:text-stone-900 dark:hover:text-white inline-flex items-center gap-1 min-h-10 -ml-1 pl-1 pr-2">
+  <span aria-hidden="true">←</span> Sessione
+</a>
 {% endblock %}
 {% block content %}
 <section class="space-y-2">
   <h1 class="text-xl font-semibold">A/B: multi-view vs single-view</h1>
-  <p class="text-sm text-stone-600">{{ meta.idea }}</p>
+  <p class="text-sm text-stone-600 dark:text-stone-300">{{ meta.idea }}</p>
 </section>
 
 <section class="mt-6 grid gap-4 md:grid-cols-2">
-  <div class="bg-white rounded-xl border border-stone-200 overflow-hidden">
-    <div class="px-4 py-2 border-b bg-stone-50 text-sm font-medium">A · front + back</div>
-    <model-viewer src="/sessions/{{ session_id }}/files/3d/model.glb"
+  <div class="bg-white dark:bg-stone-900 rounded-xl border border-stone-200 dark:border-stone-800 overflow-hidden">
+    <div class="px-4 py-2 border-b border-stone-200 dark:border-stone-800 bg-stone-50 dark:bg-stone-800/50 text-sm font-medium">A · front + back</div>
+    <model-viewer src="{{ root_path }}/sessions/{{ session_id }}/files/3d/model.glb"
                   camera-controls touch-action="pan-y" auto-rotate
-                  style="width:100%; height:55vh; background:#f5f5f4;"></model-viewer>
-    <div class="px-4 py-2 text-xs text-stone-500 space-y-0.5">
+                  style="width:100%; height:min(55dvh, 460px); background:#f5f5f4;"></model-viewer>
+    <div class="px-4 py-2 text-xs text-stone-500 dark:text-stone-400 space-y-0.5">
       <p>multi-image-to-3d · {{ a.credits or '—' }} credit</p>
       <p>bbox: {{ a.bbox }}</p>
     </div>
   </div>
 
-  <div class="bg-white rounded-xl border border-stone-200 overflow-hidden">
-    <div class="px-4 py-2 border-b bg-stone-50 text-sm font-medium">B · solo front</div>
-    <model-viewer src="/sessions/{{ session_id }}/files/3d_ab/single_view/model.glb"
+  <div class="bg-white dark:bg-stone-900 rounded-xl border border-stone-200 dark:border-stone-800 overflow-hidden">
+    <div class="px-4 py-2 border-b border-stone-200 dark:border-stone-800 bg-stone-50 dark:bg-stone-800/50 text-sm font-medium">B · solo front</div>
+    <model-viewer src="{{ root_path }}/sessions/{{ session_id }}/files/3d_ab/single_view/model.glb"
                   camera-controls touch-action="pan-y" auto-rotate
-                  style="width:100%; height:55vh; background:#f5f5f4;"></model-viewer>
-    <div class="px-4 py-2 text-xs text-stone-500 space-y-0.5">
+                  style="width:100%; height:min(55dvh, 460px); background:#f5f5f4;"></model-viewer>
+    <div class="px-4 py-2 text-xs text-stone-500 dark:text-stone-400 space-y-0.5">
       <p>image-to-3d single-view · {{ b.credits or '—' }} credit</p>
       <p>bbox: {{ b.bbox }}</p>
     </div>
   </div>
 </section>
 
-<section class="mt-6 bg-amber-50 border border-amber-200 rounded-xl p-4 text-sm space-y-2 text-amber-900">
+<section class="mt-6 bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-900 rounded-xl p-4 text-sm space-y-2 text-amber-900 dark:text-amber-200">
   <p class="font-medium">Cose da osservare:</p>
   <ul class="list-disc list-inside space-y-1">
     <li>Profondità Y (antero-posteriore): B è {{ y_diff_pct }}% più sottile di A.</li>

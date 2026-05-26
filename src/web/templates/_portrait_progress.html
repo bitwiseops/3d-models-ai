@@ -1,0 +1,7 @@
+{% set job = active_job %}
+<div id="job-progress-card"
+     hx-ext="sse"
+     sse-connect="{{ root_path }}/events/{{ job.job_id }}"
+     sse-swap="message">
+  {% include "_portrait_progress_inner.html" %}
+</div>

@@ -1,0 +1,57 @@
+{# Macro condivisi tra le 3 sezioni (Oggetti / Portraits / SCAD). #}
+
+{% macro status_pill(state, has_active_job=False, accepted=None) %}
+{# Restituisce il chip stato semantico. Disambigua "Bozza + job attivo"
+   in "In elaborazione". #}
+{% if has_active_job %}
+<span class="inline-flex items-center gap-1 text-xs font-medium text-amber-700 dark:text-amber-300 bg-amber-50 dark:bg-amber-950/40 rounded-full px-2 py-0.5">
+  <span class="inline-block w-1.5 h-1.5 rounded-full bg-amber-500 pulse"></span>
+  In elaborazione
+</span>
+{% elif accepted %}
+<span class="inline-flex items-center text-xs font-medium text-emerald-700 dark:text-emerald-300 bg-emerald-50 dark:bg-emerald-950/40 rounded-full px-2 py-0.5">
+  Pronto v{{ accepted }}
+</span>
+{% elif state in ('done', 'completed') %}
+<span class="inline-flex items-center text-xs font-medium text-emerald-700 dark:text-emerald-300 bg-emerald-50 dark:bg-emerald-950/40 rounded-full px-2 py-0.5">
+  Pronto
+</span>
+{% elif state == 'accepted' %}
+<span class="inline-flex items-center text-xs font-medium text-amber-700 dark:text-amber-300 bg-amber-50 dark:bg-amber-950/40 rounded-full px-2 py-0.5">
+  Generazione 3D…
+</span>
+{% elif state == 'failed' %}
+<span class="inline-flex items-center text-xs font-medium text-red-700 dark:text-red-300 bg-red-50 dark:bg-red-950/40 rounded-full px-2 py-0.5">
+  Errore
+</span>
+{% else %}
+<span class="inline-flex items-center text-xs font-medium text-stone-500 dark:text-stone-400 bg-stone-100 dark:bg-stone-800 rounded-full px-2 py-0.5">
+  Bozza
+</span>
+{% endif %}
+{% endmacro %}
+
+
+{% macro download_link(href, label, icon='⬇') %}
+<a href="{{ href }}" download
+   class="inline-flex items-center gap-1 rounded-lg border border-stone-300 dark:border-stone-700 text-stone-700 dark:text-stone-200 px-3 py-2 text-sm font-medium hover:bg-stone-50 dark:hover:bg-stone-800 min-h-11 focus-visible:outline-2 focus-visible:outline-offset-2">
+  {{ icon }} {{ label }}
+</a>
+{% endmacro %}
+
+
+{% macro validation_badge(v) %}
+{# Compatto, identico a quello esistente in _scad_iterations, isolato qui. #}
+{% if v %}
+  {% set warns = v.warnings or [] %}
+  {% if v.auto_fixed %}
+    <span class="inline-flex items-center text-[10px] text-amber-700 dark:text-amber-300 bg-amber-50 dark:bg-amber-950/40 rounded-full px-1.5 py-0.5">⚙ fix</span>
+  {% elif not v.is_manifold %}
+    <span class="inline-flex items-center text-[10px] text-red-700 dark:text-red-300 bg-red-50 dark:bg-red-950/40 rounded-full px-1.5 py-0.5">✕ broken</span>
+  {% elif warns %}
+    <span class="inline-flex items-center text-[10px] text-amber-700 dark:text-amber-300 bg-amber-50 dark:bg-amber-950/40 rounded-full px-1.5 py-0.5">⚠ {{ warns|length }}</span>
+  {% else %}
+    <span class="inline-flex items-center text-[10px] text-emerald-700 dark:text-emerald-300 bg-emerald-50 dark:bg-emerald-950/40 rounded-full px-1.5 py-0.5">✓ ok</span>
+  {% endif %}
+{% endif %}
+{% endmacro %}

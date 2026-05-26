@@ -1,0 +1,35 @@
+{% extends "base.html" %}
+{% block title %}{{ meta.idea[:40] }} · SCAD{% endblock %}
+{% block header_nav %}
+<a href="{{ root_path }}/scad" class="text-sm text-stone-600 dark:text-stone-300 hover:text-stone-900 dark:hover:text-white inline-flex items-center gap-1 min-h-10 -ml-1 pl-1 pr-2">
+  <span aria-hidden="true">←</span> SCAD
+</a>
+{% endblock %}
+{% block content %}
+
+<section class="space-y-2">
+  <h1 class="text-2xl font-semibold leading-tight">{{ meta.idea }}</h1>
+  <p class="text-xs text-stone-500 dark:text-stone-400">creato {{ meta.created_at }}</p>
+</section>
+
+{% if meta.reference %}
+<section class="mt-4">
+  <p class="text-xs font-medium text-stone-500 dark:text-stone-400 mb-2 uppercase tracking-wide">Reference</p>
+  <img src="{{ root_path }}/scad/{{ scad_id }}/files/{{ meta.reference }}"
+       loading="lazy" decoding="async"
+       class="w-32 aspect-square object-cover rounded-lg bg-stone-100 dark:bg-stone-800">
+</section>
+{% endif %}
+
+<section class="mt-6"
+         id="scad-iterations-wrapper"
+         hx-ext="sse"
+         sse-connect="{{ root_path }}/events/sessions/{{ scad_id }}"
+         sse-swap="iteration_added"
+         hx-get="{{ root_path }}/scad/{{ scad_id }}/fragment"
+         hx-trigger="sse:iteration_added"
+         hx-swap="innerHTML">
+  {% include "_scad_iterations.html" %}
+</section>
+
+{% endblock %}

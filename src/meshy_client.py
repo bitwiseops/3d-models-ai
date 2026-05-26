@@ -55,18 +55,27 @@ def image_to_image(
     reference_image_urls: list[str],
     *,
     ai_model: str = config.MESHY_IMAGE_MODEL,
+    generate_multi_view: bool = False,
     api_key: str | None = None,
 ) -> str:
-    """reference_image_urls: 1–5 voci, URL pubblici o data URI base64."""
+    """reference_image_urls: 1–5 voci, URL pubblici o data URI base64.
+
+    Con `generate_multi_view=True`, l'API genera 3 viste del soggetto da
+    angolazioni diverse: il task SUCCEEDED avrà `image_urls` di lunghezza 3
+    invece di 1. Default False per non rompere i call site che si aspettano
+    una singola immagine.
+    """
     if not 1 <= len(reference_image_urls) <= 5:
         raise MeshyError(
             f"image-to-image richiede 1-5 reference (ne hai {len(reference_image_urls)})."
         )
-    body = {
+    body: dict = {
         "prompt": prompt,
         "ai_model": ai_model,
         "reference_image_urls": reference_image_urls,
     }
+    if generate_multi_view:
+        body["generate_multi_view"] = True
     r = requests.post(
         f"{config.MESHY_BASE}/image-to-image",
         json=body,

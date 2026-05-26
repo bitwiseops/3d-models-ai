@@ -23,7 +23,14 @@ def _render_job_fragment(request: Request, session_id: str, snapshot: dict) -> s
     progress_status, log_tail, error).
     """
     templates = request.app.state.templates
-    return templates.get_template("_job_progress_inner.html").render(
+    kind = snapshot.get("kind")
+    if kind == "portrait":
+        tpl_name = "_portrait_progress_inner.html"
+    elif kind == "scad":
+        tpl_name = "_scad_progress_inner.html"
+    else:
+        tpl_name = "_job_progress_inner.html"
+    return templates.get_template(tpl_name).render(
         request=request, job=snapshot, session_id=session_id
     )
 
@@ -92,7 +99,12 @@ async def session_events(
             status = snapshot.get("status")
             if status == "done":
                 kind = snapshot.get("kind", "image")
-                event_type = "3d_ready" if kind == "accept" else "iteration_added"
+                if kind == "accept":
+                    event_type = "3d_ready"
+                elif kind == "portrait":
+                    event_type = "portrait_ready"
+                else:
+                    event_type = "iteration_added"
                 yield {"event": event_type, "data": ""}
                 return
             elif status == "failed":

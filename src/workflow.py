@@ -7,13 +7,14 @@ from typing import Callable
 import numpy as np
 from PIL import Image
 
-from . import config, mesh_repair, meshy_client, prompt_refiner, storage
+from . import config, grid_utils, mesh_repair, meshy_client, prompt_refiner, storage
 
 
 # STL per processing (single mesh fuso), GLB per preview <model-viewer> nella web UI.
 # Meshy include il GLB nello stesso task: zero credit extra.
 TARGET_FORMATS = ("stl", "glb")
-IMAGE_ASPECT_RATIO = "16:9"
+# Grid 2x2 (4 viste in un'unica immagine), poi cropped lato Python.
+IMAGE_ASPECT_RATIO = "1:1"
 
 # Tipi callback opzionali per web/SSE.
 ProgressCallback = Callable[[int, str], None] | None  # (progress_pct, status)
@@ -164,30 +165,32 @@ def _generate_image(
         api_key=api_key,
     )
     image_url = task["image_urls"][0]
-    image_path = storage.save_image_from_url(session, version, image_url)
-    front_path, back_path, clean_path = _split_image(image_path)
+    grid_path = storage.save_image_from_url(session, version, image_url)
+    # Rename the saved file to highlight that it's the grid source.
+    new_grid_path = grid_path.with_name(grid_path.stem + "_grid.png")
+    grid_path.rename(new_grid_path)
+    grid_path = new_grid_path
+    quadrants = grid_utils.crop_grid_2x2(grid_path, prefix=grid_path.stem)
     credits = task.get("consumed_credits", 0)
     iter_record = {
         "version": version,
         "prompt": prompt,
         "image_task_id": img_task_id,
-        "image_path": str(image_path.relative_to(session)),
-        "front_path": str(front_path.relative_to(session)),
-        "back_path": str(back_path.relative_to(session)),
+        # `image_path` rimane per compat con codice/template che lo cercano.
+        "image_path": str(grid_path.relative_to(session)),
+        "grid_path": str(grid_path.relative_to(session)),
+        "image_paths_grid": [str(p.relative_to(session)) for p in quadrants],
         "credits": credits,
     }
-    if clean_path is not None:
-        iter_record["clean_path"] = str(clean_path.relative_to(session))
     storage.update_metadata(
         session,
         append_iteration=iter_record,
         add_credits={"text_to_image": credits},
     )
-    print(f"Immagine combinata salvata: {image_path}")
-    print(f"  split → {front_path.name} + {back_path.name}"
-          + (f" + {clean_path.name}" if clean_path else ""))
+    print(f"Grid 2x2 salvato: {grid_path}")
+    print(f"  quadranti → {', '.join(p.name for p in quadrants)}")
     print(f"  credits: {credits}")
-    return image_path
+    return grid_path
 
 
 def prepare_session(idea: str, references: list[Path] | None = None) -> Path:
@@ -264,9 +267,11 @@ def continue_with_feedback(
     on_progress: ProgressCallback = None,
     api_key: str | None = None,
     skip_open: bool = False,
+    use_previous_image: bool = True,
 ) -> Path:
     """Raffina con feedback, genera prossima immagine.
-    Ritorna nuovo image_path."""
+    Ritorna nuovo image_path. Se `use_previous_image=False`, Claude raffina
+    senza vedere le immagini delle iterazioni precedenti."""
     meta = storage.load_metadata(session)
     if not meta["iterations"]:
         raise RuntimeError("Sessione senza iterazioni: usa prima `start`.")
@@ -274,16 +279,25 @@ def continue_with_feedback(
         raise RuntimeError("Sessione già accettata: non si può rigenerare la 2D.")
 
     idea = meta["idea"]
+    # Per le nuove iterazioni-grid usa `grid_path` (la composita 2x2) come cue
+    # visivo singolo; fallback a `image_path` per iterazioni legacy.
     history = [
-        {"prompt": it["prompt"], "image_path": session / it["image_path"]}
+        {
+            "prompt": it["prompt"],
+            "image_path": session / (it.get("grid_path") or it["image_path"]),
+        }
         for it in meta["iterations"]
     ]
     last = meta["iterations"][-1]
-    last_image = session / last["image_path"]
+    last_image = session / (last.get("grid_path") or last["image_path"])
 
-    print("\nRaffinamento prompt con feedback…")
+    print(
+        f"\nRaffinamento prompt con feedback "
+        f"(use_previous_image={use_previous_image})…"
+    )
     new_prompt = prompt_refiner.refine_with_feedback(
-        idea, history, last_image, feedback
+        idea, history, last_image, feedback,
+        use_previous_image=use_previous_image,
     )
     new_version = last["version"] + 1
     storage.save_prompt(session, new_version, new_prompt)
@@ -324,9 +338,17 @@ def accept_and_generate_3d(
     )
 
     print(f"\n[3/3] Generazione 3D multi-view via Meshy ({config.MESHY_3D_MODEL})…")
-    front = session / last["front_path"]
-    back = session / last["back_path"]
-    image_urls = [_to_data_uri(front), _to_data_uri(back)]
+    if last.get("image_paths_grid"):
+        # Nuovo flusso: 4 quadranti del grid 2x2 → multi-image-to-3d.
+        quadrant_paths = [session / p for p in last["image_paths_grid"]]
+        image_urls = [_to_data_uri(p) for p in quadrant_paths]
+        print(f"  input: {len(image_urls)} viste dal grid 2x2")
+    else:
+        # Legacy: front + back dalla vecchia split 16:9.
+        front = session / last["front_path"]
+        back = session / last["back_path"]
+        image_urls = [_to_data_uri(front), _to_data_uri(back)]
+        print("  input: legacy front + back (2 viste)")
     model_task_id = meshy_client.multi_image_to_3d(
         image_urls=image_urls,
         target_formats=TARGET_FORMATS,

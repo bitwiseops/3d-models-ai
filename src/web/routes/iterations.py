@@ -18,10 +18,15 @@ async def post_feedback(
     session_id: str,
     request: Request,
     feedback: str = Form(...),
+    use_previous_image: str | None = Form(default=None),
     session: Path = Depends(resolve_session),
     jm: JobManager = Depends(get_job_manager),
 ) -> HTMLResponse:
-    """Sottomette un nuovo round di image generation con feedback."""
+    """Sottomette un nuovo round di image generation con feedback.
+
+    `use_previous_image`: checkbox HTML — presente=on (sempre la stringa "1"),
+    assente=None. Mappiamo a bool.
+    """
     feedback = feedback.strip()
     if not feedback:
         raise HTTPException(status_code=400, detail="Feedback vuoto")
@@ -30,10 +35,12 @@ async def post_feedback(
         raise HTTPException(status_code=409, detail="Job già in corso per questa sessione")
 
     api_key = request.app.state.meshy_api_key
+    use_prev = use_previous_image is not None
 
     def task() -> str:
         path = workflow.continue_with_feedback(
-            session, feedback, api_key=api_key, skip_open=True
+            session, feedback, api_key=api_key, skip_open=True,
+            use_previous_image=use_prev,
         )
         return str(path)
 

@@ -1,0 +1,82 @@
+{% extends "base.html" %}
+{% block title %}Portrait · {{ (meta.user_prompt or 'senza prompt')[:40] }}{% endblock %}
+{% block header_nav %}
+<a href="{{ root_path }}/portraits" class="text-sm text-stone-600 dark:text-stone-300 hover:text-stone-900 dark:hover:text-white inline-flex items-center gap-1 min-h-10 -ml-1 pl-1 pr-2">
+  <span aria-hidden="true">←</span> Portraits
+</a>
+{% endblock %}
+{% block content %}
+
+<section class="space-y-2">
+  <h1 class="text-2xl font-semibold leading-tight">{{ meta.user_prompt or 'Portrait' }}</h1>
+  {% if meta.parent_id %}
+  <p class="text-xs text-stone-500 dark:text-stone-400">
+    <a href="{{ root_path }}/portraits/{{ meta.parent_id }}" class="hover:underline">
+      ← variante di «{{ meta.parent_prompt or meta.parent_id }}»
+    </a>
+  </p>
+  {% endif %}
+  <p class="text-xs text-stone-500 dark:text-stone-400">creato {{ meta.created_at }}</p>
+</section>
+
+{% if meta.reference %}
+<section class="mt-4">
+  <p class="text-xs font-medium text-stone-500 dark:text-stone-400 mb-2 uppercase tracking-wide">Reference</p>
+  <img src="{{ root_path }}/portraits/{{ portrait_id }}/files/{{ meta.reference }}"
+       loading="lazy" decoding="async"
+       class="w-32 aspect-square object-cover rounded-lg bg-stone-100 dark:bg-stone-800">
+</section>
+{% endif %}
+
+{% if active_job %}
+<section class="mt-6">
+  {% include "_portrait_progress.html" %}
+</section>
+{% endif %}
+
+<section class="mt-6"
+         id="portrait-result-wrapper"
+         hx-ext="sse"
+         sse-connect="{{ root_path }}/events/sessions/{{ portrait_id }}"
+         sse-swap="portrait_ready"
+         hx-get="{{ root_path }}/portraits/{{ portrait_id }}/fragment"
+         hx-trigger="sse:portrait_ready"
+         hx-swap="innerHTML">
+  {% include "_portrait_result.html" %}
+</section>
+
+{# Action bar: visibile solo se c'è almeno un output e non è in elaborazione. #}
+{% set has_output = (meta.image_paths_multi or []) or (meta.image_paths_grid or []) or (meta.image_paths or []) %}
+{% if has_output and not active_job %}
+{% with regen_action={'dialog': "document.getElementById('portrait-regen').showModal()"},
+        download_href=root_path ~ '/portraits/' ~ portrait_id ~ '/download.zip',
+        download_label='Scarica .zip' %}
+  {% include "_action_bar.html" %}
+{% endwith %}
+
+{# Dialog refine portrait (variante) #}
+<dialog id="portrait-regen" class="sheet rounded-2xl p-0 max-w-md bg-white dark:bg-stone-900 text-stone-900 dark:text-stone-100 backdrop:bg-stone-900/40 dark:backdrop:bg-black/60">
+  <form method="post" action="{{ root_path }}/portraits/{{ portrait_id }}/regen" class="p-5 space-y-3 relative">
+    <div class="sm:hidden mx-auto h-1.5 w-10 rounded-full bg-stone-300 dark:bg-stone-700 -mt-1 mb-1"></div>
+    <button type="button" aria-label="{{ C.BTN_CLOSE }}"
+            onclick="document.getElementById('portrait-regen').close()"
+            class="absolute top-2 right-2 inline-flex items-center justify-center w-11 h-11 rounded-full text-stone-500 hover:bg-stone-100 dark:hover:bg-stone-800 text-xl leading-none">×</button>
+    <div class="pr-10">
+      <h2 class="text-base font-semibold">Rigenera come variante</h2>
+      <p class="text-xs text-stone-500 dark:text-stone-400">Crea un nuovo portrait collegato a questo, riusando la stessa reference. Puoi modificare il prompt.</p>
+    </div>
+    <label class="block">
+      <span class="text-sm font-medium text-stone-700 dark:text-stone-300">{{ C.LABEL_PROMPT }}</span>
+      <textarea name="prompt" rows="3"
+                placeholder="vuoto = stesso prompt dell'originale"
+                class="mt-1 block w-full rounded-lg border-stone-300 dark:border-stone-700 bg-stone-50 dark:bg-stone-800 px-3 py-2 text-base">{{ meta.user_prompt or '' }}</textarea>
+    </label>
+    <button type="submit"
+            class="w-full rounded-lg bg-stone-900 dark:bg-stone-100 text-white dark:text-stone-900 px-4 py-3 text-sm font-medium hover:bg-stone-800 dark:hover:bg-white min-h-11">
+      Crea variante
+    </button>
+  </form>
+</dialog>
+{% endif %}
+
+{% endblock %}

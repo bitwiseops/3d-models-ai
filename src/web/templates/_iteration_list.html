@@ -2,7 +2,10 @@
    pagina completa OR come fragment HTMX dopo evento SSE. #}
 
 {% if active_job %}
-<div id="job-progress" class="sticky top-16 z-[5] mb-4">
+{# Sticky solo se ci sono iterazioni sopra da scrollare; nelle sessioni
+   in bozza (nessuna iterazione) l'overlay sticky sarebbe inutile e
+   coprirebbe lo spazio della prima immagine in arrivo. #}
+<div id="job-progress" class="{% if meta.iterations %}sticky top-14 z-[5]{% endif %} mb-4">
   {% with job=active_job %}
     {% include "_job_progress.html" %}
   {% endwith %}
@@ -10,7 +13,7 @@
 {% endif %}
 
 {% if not meta.iterations %}
-<div class="bg-amber-50 border border-amber-200 rounded-xl p-4 text-amber-800 text-sm">
+<div class="bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-900 rounded-xl p-4 text-amber-800 dark:text-amber-200 text-sm">
   {% if active_job %}Generazione prima immagine in corso…
   {% else %}Nessuna iterazione. Qualcosa è andato storto.
   {% endif %}
@@ -18,22 +21,45 @@
 {% endif %}
 
 {# Iterazioni: la più recente in cima #}
+{% set grid_labels = {'front': 'Front', 'three_quarter': '3/4', 'side': 'Side', 'back': 'Back'} %}
 <ol class="space-y-4">
   {% for it in meta.iterations | reverse %}
-  <li class="bg-white rounded-xl border border-stone-200 overflow-hidden">
-    <img src="/sessions/{{ session_id }}/files/{{ it.clean_path or it.image_path }}"
-         alt="v{{ it.version }}" class="w-full aspect-video object-contain bg-stone-100">
+  <li class="bg-white dark:bg-stone-900 rounded-xl border border-stone-200 dark:border-stone-800 overflow-hidden">
+    {% if it.image_paths_grid %}
+    <div class="grid grid-cols-2 gap-px bg-stone-200 dark:bg-stone-800">
+      {% for q in it.image_paths_grid %}
+      {% set qname = q.rsplit('/', 1)[-1].rsplit('.', 1)[0].rsplit('_', 1)[-1] %}
+      <figure class="relative bg-stone-100 dark:bg-stone-800">
+        <img src="{{ root_path }}/sessions/{{ session_id }}/files/{{ q }}"
+             alt="v{{ it.version }} {{ qname }}" loading="lazy" decoding="async"
+             class="w-full aspect-square object-contain">
+        <figcaption class="absolute bottom-1 left-1 text-[10px] uppercase tracking-wide px-1.5 py-0.5 rounded bg-white/80 dark:bg-stone-900/80 text-stone-700 dark:text-stone-300">{{ grid_labels.get(qname, qname) }}</figcaption>
+      </figure>
+      {% endfor %}
+    </div>
+    {% else %}
+    <img src="{{ root_path }}/sessions/{{ session_id }}/files/{{ it.clean_path or it.image_path }}"
+         alt="v{{ it.version }}" loading="lazy" decoding="async" class="w-full aspect-video object-contain bg-stone-100 dark:bg-stone-800">
+    {% endif %}
     <div class="p-4 space-y-2">
       <div class="flex items-center justify-between">
-        <span class="text-xs font-medium text-stone-500 uppercase tracking-wide">v{{ it.version }}</span>
+        <span class="text-xs font-medium text-stone-500 dark:text-stone-400 uppercase tracking-wide">v{{ it.version }}</span>
         {% if meta.accepted_iteration == it.version %}
-        <span class="text-xs font-medium text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded-full">Accettata</span>
+        <span class="text-xs font-medium text-emerald-700 dark:text-emerald-300 bg-emerald-50 dark:bg-emerald-950/50 px-2 py-0.5 rounded-full">Accettata</span>
         {% endif %}
       </div>
-      <details class="text-sm text-stone-700">
-        <summary class="cursor-pointer text-stone-500 hover:text-stone-900">prompt</summary>
+      <details class="text-sm text-stone-700 dark:text-stone-300">
+        <summary class="cursor-pointer text-stone-500 dark:text-stone-400 hover:text-stone-900 dark:hover:text-stone-100 py-2 -my-2">prompt</summary>
         <p class="mt-2 whitespace-pre-wrap text-xs leading-relaxed">{{ it.prompt }}</p>
       </details>
+      {% if it.grid_path %}
+      <details class="text-sm text-stone-700 dark:text-stone-300">
+        <summary class="cursor-pointer text-stone-500 dark:text-stone-400 hover:text-stone-900 dark:hover:text-stone-100 py-2 -my-2">grid sorgente</summary>
+        <img src="{{ root_path }}/sessions/{{ session_id }}/files/{{ it.grid_path }}"
+             alt="grid sorgente v{{ it.version }}" loading="lazy" decoding="async"
+             class="mt-2 w-full aspect-square object-contain rounded-lg bg-stone-100 dark:bg-stone-800">
+      </details>
+      {% endif %}
     </div>
   </li>
   {% endfor %}
@@ -42,23 +68,28 @@
 {# Bottoni azione: solo se non si è già accettato e non c'è un job in corso #}
 {% if meta.iterations and not meta.accepted_iteration and not active_job %}
 <section class="mt-6 space-y-3">
-  <form hx-post="/sessions/{{ session_id }}/feedback"
+  <form hx-post="{{ root_path }}/sessions/{{ session_id }}/feedback"
         hx-target="#job-progress-mount"
         hx-swap="innerHTML"
-        class="bg-white border border-stone-200 rounded-xl p-4 space-y-3">
+        class="bg-white dark:bg-stone-900 border border-stone-200 dark:border-stone-800 rounded-xl p-4 space-y-3">
     <label class="block">
-      <span class="text-sm font-medium text-stone-700">Feedback per rigenerare</span>
+      <span class="text-sm font-medium text-stone-700 dark:text-stone-300">Feedback per rigenerare</span>
       <textarea name="feedback" required rows="2"
                 placeholder="es. più luminoso, più dettagli sulla cappa"
-                class="mt-1 block w-full rounded-lg border-stone-300 bg-stone-50 px-3 py-2 text-base"></textarea>
+                class="mt-1 block w-full rounded-lg border-stone-300 dark:border-stone-700 bg-stone-50 dark:bg-stone-800 px-3 py-2 text-base"></textarea>
+    </label>
+    <label class="flex items-center gap-2 text-sm text-stone-600 dark:text-stone-300 select-none">
+      <input type="checkbox" name="use_previous_image" value="1" checked
+             class="h-4 w-4 rounded border-stone-300 dark:border-stone-600 text-stone-900 dark:text-stone-100 focus:ring-stone-900 dark:focus:ring-stone-200">
+      Usa la generazione precedente come riferimento visivo
     </label>
     <button type="submit"
-            class="w-full rounded-lg bg-stone-900 text-white px-4 py-3 text-base font-medium hover:bg-stone-800 min-h-12">
+            class="w-full rounded-lg bg-stone-900 dark:bg-stone-100 text-white dark:text-stone-900 px-4 py-3 text-base font-medium hover:bg-stone-800 dark:hover:bg-white min-h-12">
       Rigenera immagine
     </button>
   </form>
 
-  <form hx-post="/sessions/{{ session_id }}/accept"
+  <form hx-post="{{ root_path }}/sessions/{{ session_id }}/accept"
         hx-target="#job-progress-mount"
         hx-swap="innerHTML"
         hx-confirm="Avviare la pipeline 3D? L'iterazione corrente verrà accettata e non si potrà più rigenerare.">
@@ -78,21 +109,21 @@
 <section class="mt-8 space-y-3">
   <h2 class="text-lg font-semibold">Modello 3D</h2>
   {% if raw_glb %}
-  <div class="bg-white rounded-xl border border-stone-200 overflow-hidden">
-    <model-viewer src="/sessions/{{ session_id }}/files/{{ raw_glb }}"
+  <div class="bg-white dark:bg-stone-900 rounded-xl border border-stone-200 dark:border-stone-800 overflow-hidden">
+    <model-viewer src="{{ root_path }}/sessions/{{ session_id }}/files/{{ raw_glb }}"
                   camera-controls touch-action="pan-y" auto-rotate ar
-                  style="width:100%; height:60vh; background:#f5f5f4;"></model-viewer>
-    <p class="px-4 py-2 text-xs text-stone-500 border-t">Anteprima Meshy raw (con texture PBR)</p>
+                  style="width:100%; height:min(60dvh, 520px); background:#f5f5f4;"></model-viewer>
+    <p class="px-4 py-2 text-xs text-stone-500 dark:text-stone-400 border-t border-stone-200 dark:border-stone-800">Anteprima Meshy raw (con texture PBR)</p>
   </div>
   {% endif %}
   {% if printable %}
-  <div class="bg-white border border-stone-200 rounded-xl p-4 space-y-2">
-    <p class="text-sm font-medium text-stone-700">Print-ready (manifold garantito)</p>
+  <div class="bg-white dark:bg-stone-900 border border-stone-200 dark:border-stone-800 rounded-xl p-4 space-y-2">
+    <p class="text-sm font-medium text-stone-700 dark:text-stone-200">Print-ready (manifold garantito)</p>
     <div class="flex flex-wrap gap-2">
       {% for fmt, path in printable.items() %}
-      <a href="/sessions/{{ session_id }}/files/{{ path }}"
+      <a href="{{ root_path }}/sessions/{{ session_id }}/files/{{ path }}"
          download
-         class="inline-flex items-center gap-1 rounded-lg border border-stone-300 px-3 py-2 text-sm font-medium hover:bg-stone-50 min-h-10">
+         class="inline-flex items-center gap-1 rounded-lg border border-stone-300 dark:border-stone-700 text-stone-700 dark:text-stone-200 px-3 py-2 text-sm font-medium hover:bg-stone-50 dark:hover:bg-stone-800 min-h-11">
         ⬇ {{ fmt | upper }}
       </a>
       {% endfor %}

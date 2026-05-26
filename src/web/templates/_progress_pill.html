@@ -1,0 +1,56 @@
+{# Progress pill globale. Auto-refresh via HTMX polling ogni 4s: quando il
+   job termina, il fragment torna vuoto e la pill scompare. La sheet
+   subscribe in SSE per gli update in tempo reale. #}
+{% set agj = request.state.active_job_global if request and request.state and request.state.active_job_global else None %}
+{% if agj %}
+{% set label_map = {
+    'image': 'Generazione immagine',
+    'feedback': 'Rigenerazione immagine',
+    'accept': 'Generazione 3D',
+    'portrait': 'Generazione portrait',
+    'scad': 'Generazione SCAD'
+} %}
+{% set label = label_map.get(agj.kind, 'In corso') %}
+<div id="progress-pill"
+     class="fixed right-3 z-30 transition-opacity"
+     style="bottom: calc(var(--bottom-nav-h, 0px) + var(--safe-bottom) + 12px);"
+     hx-get="{{ root_path }}/_pill"
+     hx-trigger="every 4s"
+     hx-swap="outerHTML">
+  <button type="button"
+          onclick="document.getElementById('progress-sheet').showModal()"
+          aria-label="Stato avanzamento, tap per dettagli"
+          class="pulse inline-flex items-center gap-2 rounded-full bg-amber-500 dark:bg-amber-600 text-white px-3.5 py-2 text-sm font-medium shadow-lg shadow-amber-500/30 hover:bg-amber-600 min-h-11">
+    <span class="inline-block w-2.5 h-2.5 rounded-full border-2 border-white border-t-transparent spin"></span>
+    <span class="truncate max-w-[160px]">{{ label }}</span>
+    <span class="text-xs opacity-90 tabular-nums">{{ agj.progress }}%</span>
+  </button>
+</div>
+
+<dialog id="progress-sheet" class="sheet rounded-2xl p-0 max-w-md bg-white dark:bg-stone-900 text-stone-900 dark:text-stone-100 backdrop:bg-stone-900/40 dark:backdrop:bg-black/60">
+  <div class="p-5 space-y-3 relative">
+    <div class="sm:hidden mx-auto h-1.5 w-10 rounded-full bg-stone-300 dark:bg-stone-700 -mt-1 mb-1"></div>
+    <button type="button" aria-label="Chiudi"
+            onclick="document.getElementById('progress-sheet').close()"
+            class="absolute top-2 right-2 inline-flex items-center justify-center w-11 h-11 rounded-full text-stone-500 hover:bg-stone-100 dark:hover:bg-stone-800 text-xl leading-none">×</button>
+    <div class="pr-10">
+      <h2 class="text-lg font-semibold">{{ label }}</h2>
+      <p class="text-xs text-stone-500 dark:text-stone-400">sessione: {{ agj.session_id }}</p>
+    </div>
+    <div id="progress-sheet-body"
+         hx-ext="sse"
+         sse-connect="{{ root_path }}/events/{{ agj.job_id }}"
+         sse-swap="message">
+      <div class="text-stone-500 dark:text-stone-400 text-sm">Connessione…</div>
+    </div>
+  </div>
+</dialog>
+{% else %}
+{# Job terminato: lascia un placeholder vuoto che continua a polling
+   nel caso un nuovo job parta (poll leggera, 8s, opzionale). #}
+<div id="progress-pill"
+     class="hidden"
+     hx-get="{{ root_path }}/_pill"
+     hx-trigger="every 8s"
+     hx-swap="outerHTML"></div>
+{% endif %}
