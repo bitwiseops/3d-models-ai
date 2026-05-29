@@ -85,6 +85,7 @@ Entry point: `uv run models3d` (o `uv run python -m src.main`). Modalità intera
 | `repair <session>` | Solo `mesh_repair.repair()` su `model.stl` raw |
 | `decimate <session> [--target N]` | QEM decimation su `model_repaired.stl` |
 | `flatten <session> [--thickness pct]` | `mesh_repair.flatten_base()` → `model_printable.{stl,3mf}` |
+| `cleanup [session...] [--apply]` | Elenca (dry-run) o cancella (`--apply`) gli intermedi 3D pesanti delle sessioni complete, tenendo `model.glb` + `model_printable.*`. |
 | `--test-mode` | Usa la dummy key Meshy (`MESHY_TEST_KEY`): niente credit, output fake |
 
 ## Architettura
@@ -97,6 +98,7 @@ src/
 ├── prompt_refiner.py   # wrapper Claude per refinement prompt (system prompt curato)
 ├── storage.py          # session dir layout, save image/3d, update metadata.json
 ├── mesh_repair.py      # repair() + decimate() + flatten_base() + helper Blender/PyMeshLab
+├── blender_build.py    # helper deterministici per la pipeline blender-build (live, MCP)
 └── config.py           # env var loading + costanti modello (claude-opus-4-7, meshy-6)
 ```
 
@@ -142,6 +144,28 @@ Poi step opzionali in ordine cheap→costoso, **ognuno preceduto da un check `_i
 - **`slice_mesh_plane(cap=True)`** su mesh sottili genera triangoli orfani (coppie 2-face) che vanno droppati esplicitamente. `print3d_clean_non_manifold` di Blender non li elimina.
 - **Voxel remesh** può creare piccoli body staccati: serve un secondo `drop_floaters` con soglia relativa al body principale, non assoluta.
 
+## Pipeline blender-build (live, dentro Claude Code)
+
+Pipeline separata che **NON** gira nell'app web: è orchestrata da Claude Code via gli
+strumenti MCP `mcp__blender__*` (l'app usa il raw `anthropic` SDK, che non ha accesso MCP).
+**Precondizione**: Blender aperto con l'addon `tools/blender_mcp_addon.py` connesso al
+server MCP (panel "BlenderMCP" → *Connect to MCP server*, porta 9876).
+
+Costruisce un modello 3D **incrementale** a partire da una sessione Oggetti esistente
+(descrizione + 4 crop del grid 2x2). Due passate: (1) un planner **Opus** produce
+`plan.json` (step coarse→fine espressi con primitive + modifier automatici); (2) executor
+**Sonnet** in sequenza (subagent Agent, `model: sonnet`) applicano un solo step ciascuno via
+`execute_code`, si auto-verificano con `get_viewport_screenshot` vs la vista di riferimento
+(retry max 3), e salvano uno snapshot `.blend` per modifica. Sequenza rigorosa: 1 sola
+connessione MCP + scena condivisa ⇒ mai executor in parallelo. Best-effort come il repair.
+
+- Procedura completa + template prompt: `.claude/skills/blender-build/SKILL.md`.
+- Parti deterministiche (init session, copia viste, append atomico plan/step): `src/blender_build.py`,
+  esposte come CLI `uv run python -m src.blender_build {init,inputs,save-plan,paths,record,...}`.
+- Storico in `outputs/blender/<ts-slug>/`: `plan.json`, `refs/{front,three_quarter,side,back}.png`,
+  `steps/step_NN.{blend,glb,png,json}`, `final.{blend,glb,stl}`. Output = solo modello Blender
+  (niente post-processing di stampa).
+
 ## Convenzioni
 
 - **Lingua**: codice e log in italiano. Commenti spiegano il *perché*, non il *cosa*.
@@ -155,3 +179,4 @@ Poi step opzionali in ordine cheap→costoso, **ognuno preceduto da un check `_i
 - Meshy API: `https://api.meshy.ai/openapi/v1` — modelli usati: `nano-banana-pro` (image), `meshy-6` (3D).
 - Anthropic API: modello `claude-opus-4-7` per il prompt refinement.
 - `should_remesh=True` su Meshy-6: forzato perché di default è `False` e produrrebbe topologia non controllata.
+- Blender MCP server: `https://github.com/ahujasid/blender-mcp` (di Siddharth Ahuja) — configurato in `.mcp.json` via `uvx blender-mcp`; addon Blender in `tools/blender_mcp_addon.py`.
