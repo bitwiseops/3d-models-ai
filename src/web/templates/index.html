@@ -45,6 +45,14 @@
       <input type="file" name="references" multiple accept="image/*"
              class="mt-1 block w-full text-sm text-stone-700 dark:text-stone-300 file:mr-3 file:rounded-md file:border-0 file:bg-stone-900 file:text-white dark:file:bg-stone-100 dark:file:text-stone-900 file:px-3 file:py-2 file:text-sm file:font-medium">
     </label>
+    <label class="flex items-start gap-2">
+      <input type="checkbox" name="clean_references" value="true"
+             class="mt-1 rounded border-stone-300 dark:border-stone-700 text-stone-900 dark:text-stone-100 focus:ring-stone-900 dark:focus:ring-stone-200">
+      <span class="text-sm text-stone-700 dark:text-stone-300">
+        Pulisci reference prima della generazione
+        <span class="block text-xs text-stone-500 dark:text-stone-400">Normalizza sfondo e luce delle immagini (più accurato, +crediti). Solo con reference.</span>
+      </span>
+    </label>
     <div class="flex justify-end gap-2 pt-2">
       <button type="button" onclick="document.getElementById('new-session').close()"
               class="rounded-lg px-4 py-2 text-sm font-medium text-stone-700 dark:text-stone-300 hover:bg-stone-100 dark:hover:bg-stone-800 min-h-11">Annulla</button>

@@ -16,6 +16,16 @@ TARGET_FORMATS = ("stl", "glb")
 # Grid 2x2 (4 viste in un'unica immagine), poi cropped lato Python.
 IMAGE_ASPECT_RATIO = "1:1"
 
+# Prompt per il pre-step opzionale di pulizia reference: normalizza sfondo,
+# luce e risoluzione SENZA alterare forma/proporzioni del soggetto. Migliora
+# l'accuratezza del mesh a valle (image-to-3d).
+CLEAN_REFERENCE_PROMPT = (
+    "Clean studio reference photo of the same subject: pure neutral white "
+    "background, even diffuse lighting, no harsh shadows, single centered "
+    "subject in sharp focus, high resolution. Preserve the subject's exact "
+    "shape, proportions, colors and details — do not stylize or redesign."
+)
+
 # Tipi callback opzionali per web/SSE.
 ProgressCallback = Callable[[int, str], None] | None  # (progress_pct, status)
 StepCallback = Callable[[str], None] | None  # mesh_repair step labels
@@ -143,6 +153,29 @@ def _generate_image(
             f"image-to-image ({config.MESHY_IMAGE_MODEL}, {len(references)} reference)…"
         )
         ref_uris = [_to_data_uri_any(p) for p in references]
+        meta = storage.load_metadata(session)
+        clean = meta.get("clean_references", config.MESHY_CLEAN_REFERENCES)
+        if clean:
+            print("  [clean] pre-step pulizia reference via image-to-image…")
+            clean_task_id = meshy_client.image_to_image(
+                CLEAN_REFERENCE_PROMPT, reference_image_urls=ref_uris, api_key=api_key
+            )
+            clean_task = meshy_client.poll(
+                "/image-to-image",
+                clean_task_id,
+                label=f"clean v{version}",
+                max_wait=600,
+                on_progress=on_progress,
+                api_key=api_key,
+            )
+            cleaned_urls = clean_task.get("image_urls") or []
+            if cleaned_urls:
+                ref_uris = cleaned_urls
+            storage.update_metadata(
+                session,
+                add_credits={"image_clean": clean_task.get("consumed_credits", 0)},
+            )
+            print(f"  [clean] reference normalizzate ({len(ref_uris)})")
         img_task_id = meshy_client.image_to_image(
             prompt, reference_image_urls=ref_uris, api_key=api_key
         )
@@ -193,13 +226,23 @@ def _generate_image(
     return grid_path
 
 
-def prepare_session(idea: str, references: list[Path] | None = None) -> Path:
+def prepare_session(
+    idea: str,
+    references: list[Path] | None = None,
+    *,
+    clean_references: bool | None = None,
+) -> Path:
     """Crea la session dir + salva references. Veloce e sincrona — usato dal
     web layer per avere subito la session_id da redirectare l'utente, mentre
     il lavoro slow (Claude refine + Meshy image gen) parte in background.
+
+    `clean_references`: se non None, persiste il toggle del pre-step di pulizia
+    reference in metadata (override per-sessione di config.MESHY_CLEAN_REFERENCES).
     """
     session = storage.create_session(idea)
     print(f"Sessione: {session}")
+    if clean_references is not None:
+        storage.update_metadata(session, clean_references=bool(clean_references))
     if references:
         saved_refs = storage.save_references(session, references)
         rel_refs = [str(p.relative_to(session)) for p in saved_refs]
@@ -393,8 +436,58 @@ def accept_and_generate_3d(
         add_credits={"image_to_3d": model_task.get("consumed_credits", 0)},
     )
 
-    repaired: dict[str, Path] | None = None
     src_for_repair = saved.get("stl")
+
+    # Cross-check stampabilità via Meshy (GRATIS) + fallback repair server-side.
+    # Best-effort: se l'API print fallisce, la pipeline locale prosegue invariata.
+    try:
+        printability = meshy_client.print_analyze(
+            input_task_id=model_task_id, api_key=api_key
+        )
+        status = printability.get("status", "unknown")
+        metrics = printability.get("metrics", {})
+        msg = (
+            f"printability Meshy: {status} "
+            f"(watertight={metrics.get('is_watertight')}, "
+            f"non_manifold={metrics.get('non_manifold_edges')}, "
+            f"degenerate={metrics.get('degenerate_faces')}, "
+            f"holes={metrics.get('holes')})"
+        )
+        print(f"[analyze] {msg}")
+        if on_step:
+            on_step(msg)
+        storage.update_metadata(session, printability=printability)
+
+        if status == "error":
+            print("[analyze] status=error → repair server-side Meshy (10cr)…")
+            if on_step:
+                on_step("mesh non stampabile → repair server-side Meshy")
+            repaired_url = meshy_client.print_repair(
+                input_task_id=model_task_id, api_key=api_key
+            )
+            glb_path = storage.save_3d_from_url(
+                session, "glb", repaired_url, filename="model_repaired.glb"
+            )
+            # /print/repair con input_task_id restituisce GLB → converti in STL
+            # per la pipeline locale (repair → decimate → flatten).
+            import trimesh
+
+            stl_path = session / "3d" / "model_repaired.stl"
+            trimesh.load(str(glb_path), force="mesh").export(str(stl_path))
+            src_for_repair = str(stl_path.relative_to(session))
+            storage.update_metadata(
+                session,
+                meshy_repaired_files={
+                    "glb": str(glb_path.relative_to(session)),
+                    "stl": str(stl_path.relative_to(session)),
+                },
+                add_credits={"print_repair": 10},
+            )
+            print(f"[analyze] mesh riparato Meshy → {stl_path}")
+    except Exception as e:
+        print(f"[analyze] saltato (best-effort): {e}")
+
+    repaired: dict[str, Path] | None = None
     if src_for_repair:
         print("\n[repair] post-processing per stampa…")
         try:

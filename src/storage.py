@@ -88,8 +88,8 @@ def save_references(session: Path, paths: list[Path]) -> list[Path]:
     return saved
 
 
-def save_3d_from_url(session: Path, fmt: str, url: str) -> Path:
-    path = session / "3d" / f"model.{fmt}"
+def save_3d_from_url(session: Path, fmt: str, url: str, *, filename: str | None = None) -> Path:
+    path = session / "3d" / (filename or f"model.{fmt}")
     r = requests.get(url, timeout=300)
     r.raise_for_status()
     path.write_bytes(r.content)

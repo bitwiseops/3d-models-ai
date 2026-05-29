@@ -84,6 +84,7 @@ async def create_session(
     request: Request,
     idea: str = Form(...),
     references: list[UploadFile] = File(default=[]),
+    clean_references: bool = Form(False),
     jm: JobManager = Depends(get_job_manager),
 ) -> RedirectResponse:
     """Crea una nuova sessione (sincrona: dir + references) e lancia in
@@ -107,7 +108,9 @@ async def create_session(
             ref_paths.append(dst)
 
     # Sincrono: crea la session dir (~10ms). Da qui in poi abbiamo session_id.
-    session = workflow.prepare_session(idea, ref_paths or None)
+    session = workflow.prepare_session(
+        idea, ref_paths or None, clean_references=clean_references
+    )
     if tmp_root is not None:
         shutil.rmtree(tmp_root, ignore_errors=True)
 

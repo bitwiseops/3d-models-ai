@@ -173,6 +173,94 @@ def multi_image_to_3d(
     return r.json()["result"]
 
 
+def print_analyze(
+    *,
+    input_task_id: str | None = None,
+    model_url: str | None = None,
+    api_key: str | None = None,
+) -> dict:
+    """Check stampabilità FDM via /print/analyze. GRATIS (0 crediti).
+
+    Specificare esattamente uno tra:
+    - `input_task_id`: task Meshy-6/Preview che ha prodotto il mesh
+    - `model_url`: URL pubblico del modello (GLB/STL)
+
+    Ritorna il blocco `printability` del task: dict con `status`
+    ("healthy"|"warning"|"error"|"unknown"), `metrics` (is_watertight, volume,
+    non_manifold_edges, degenerate_faces, holes) e `issue_count`. Dict vuoto se
+    il task non lo popola.
+    """
+    if (input_task_id is None) == (model_url is None):
+        raise MeshyError(
+            "print_analyze richiede esattamente uno tra input_task_id e model_url."
+        )
+    body = (
+        {"input_task_id": input_task_id}
+        if input_task_id is not None
+        else {"model_url": model_url}
+    )
+    r = requests.post(
+        f"{config.MESHY_BASE}/print/analyze",
+        json=body,
+        headers=_headers(api_key),
+        timeout=60,
+    )
+    if not r.ok:
+        raise MeshyError(f"print/analyze POST {r.status_code}: {r.text}")
+    task = poll(
+        "/print/analyze",
+        r.json()["result"],
+        label="print analyze",
+        max_wait=300,
+        api_key=api_key,
+    )
+    return task.get("printability") or {}
+
+
+def print_repair(
+    *,
+    input_task_id: str | None = None,
+    model_url: str | None = None,
+    api_key: str | None = None,
+) -> str:
+    """Repair server-side della topologia (non-manifold, degenere, buchi) via
+    /print/repair. Costo 10 crediti.
+
+    Specificare esattamente uno tra `input_task_id` (output GLB) e `model_url`
+    (output STL). Ritorna l'URL del mesh riparato (primo `model_urls` non-vuoto).
+    NB: il repair preserva la geometria, non le texture.
+    """
+    if (input_task_id is None) == (model_url is None):
+        raise MeshyError(
+            "print_repair richiede esattamente uno tra input_task_id e model_url."
+        )
+    body = (
+        {"input_task_id": input_task_id}
+        if input_task_id is not None
+        else {"model_url": model_url}
+    )
+    r = requests.post(
+        f"{config.MESHY_BASE}/print/repair",
+        json=body,
+        headers=_headers(api_key),
+        timeout=60,
+    )
+    if not r.ok:
+        raise MeshyError(f"print/repair POST {r.status_code}: {r.text}")
+    task = poll(
+        "/print/repair",
+        r.json()["result"],
+        label="print repair",
+        max_wait=600,
+        api_key=api_key,
+    )
+    urls = task.get("model_urls") or {}
+    repaired = next((u for u in urls.values() if u), None)
+    if not repaired:
+        raise MeshyError("print/repair non ha restituito alcun model_url.")
+    return repaired
+
+
 def poll(
     endpoint: str,
     task_id: str,
