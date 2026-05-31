@@ -364,7 +364,7 @@ A fine pipeline gira un nuovo gate (§5); le iterazioni restano tracciate in met
 
 ## Gotcha / principi (applicarli SEMPRE)
 
-Principi generali (dettaglio + esempi in memoria `reference_blender_build_lessons`). Aggiornarli quando emergono nuovi problemi/soluzioni.
+Principi generali (dettaglio + esempi nel **knowledge base versionato** `run/blender_build_lessons.md` — dalla cwd RUN è `blender_build_lessons.md`). **Quando durante una run emerge un nuovo problema/soluzione, AGGIUNGILO lì e committa**: il file è in repo e scrivibile dal contesto RUN (non è sotto `run/.claude/skills/`), così la conoscenza resta versionata e condivisa. NON aggiornare l'auto-memory fuori repo: la fonte canonica è il file in `run/`.
 - **Boolean = operandi puliti, NON auto-intersecanti.** Un cutter che si auto-interseca (prismi sovrapposti; prismi radiali che convergono verso l'asse con fori grandi) rende EXACT degenere e può SVUOTARE l'oggetto → un boolean per gruppo non-sovrapposto in sequenza, o self-union del cutter. Forare vicino a un rim aperto lascia schegge → confina i tagli lontano dal bordo.
 - **Modellare il positivo > sottrarre il negativo.** Per reticoli/pattern fitti e uniformi: maglia di facce + **WIREFRAME modifier** (fili uniformi a ogni scala), non boolean.
 - **`BOOLEAN UNION` preserva i materiali solo con `material_mode='TRANSFER'`** (assegnali PRIMA di unire); parti "connesse" = compenetrare + union (1 componente).
