@@ -465,14 +465,16 @@ def accept_and_generate_3d(
             repaired_url = meshy_client.print_repair(
                 input_task_id=model_task_id, api_key=api_key
             )
+            # Basename distinto da `model_repaired.*` del repair locale: altrimenti
+            # mesh_repair.repair() (più sotto) sovrascriverebbe lo STL Meshy.
             glb_path = storage.save_3d_from_url(
-                session, "glb", repaired_url, filename="model_repaired.glb"
+                session, "glb", repaired_url, filename="model_meshy_repaired.glb"
             )
             # /print/repair con input_task_id restituisce GLB → converti in STL
             # per la pipeline locale (repair → decimate → flatten).
             import trimesh
 
-            stl_path = session / "3d" / "model_repaired.stl"
+            stl_path = session / "3d" / "model_meshy_repaired.stl"
             trimesh.load(str(glb_path), force="mesh").export(str(stl_path))
             src_for_repair = str(stl_path.relative_to(session))
             storage.update_metadata(

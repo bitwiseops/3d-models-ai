@@ -113,6 +113,45 @@ def cmd_flatten(args) -> int:
     return 0
 
 
+def cmd_cleanup(args) -> int:
+    """Elenca/cancella gli intermedi 3D pesanti delle sessioni complete.
+    Dry-run di default; `--apply` per cancellare davvero."""
+    if args.sessions:
+        sessions = [Path(s) for s in args.sessions]
+    else:
+        sessions = sorted(p for p in config.OUTPUTS_ROOT.iterdir() if p.is_dir())
+
+    grand_total = 0
+    cleaned = 0
+    skipped = 0
+    for session in sessions:
+        if not (session / "metadata.json").exists():
+            continue
+        res = storage.cleanup_session(session, apply=args.apply)
+        if res["skipped"]:
+            skipped += 1
+            continue
+        if not res["files"]:
+            continue
+        cleaned += 1
+        grand_total += res["total_bytes"]
+        mb = res["total_bytes"] / (1024 * 1024)
+        verb = "cancellati" if args.apply else "cancellabili"
+        print(f"\n{session.name} — {mb:.1f} MB {verb}:")
+        for rel, sz in res["files"]:
+            print(f"    {rel:<32} {sz / (1024 * 1024):6.1f} MB")
+
+    total_mb = grand_total / (1024 * 1024)
+    print(
+        f"\n{'Recuperati' if args.apply else 'Recuperabili'}: "
+        f"{total_mb:.1f} MB su {cleaned} sessioni "
+        f"({skipped} saltate: pipeline incompleta)."
+    )
+    if not args.apply and grand_total:
+        print("Esecuzione di prova — rilancia con `--apply` per cancellare.")
+    return 0
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(
         description="Workflow Meshy + Claude per generare modelli 3D."
@@ -190,6 +229,25 @@ def main() -> int:
         f"(default: {mesh_repair.DEFAULT_BASE_THICKNESS_PCT}, cioè 2%).",
     )
     p_flatten.set_defaults(func=cmd_flatten)
+
+    p_cleanup = sub.add_parser(
+        "cleanup",
+        help="Elenca/cancella gli intermedi 3D pesanti (model.stl, "
+        "model_repaired.*, model_lowpoly.*, model_meshy_repaired.*) delle "
+        "sessioni complete, tenendo model.glb + model_printable.*. "
+        "Dry-run di default.",
+    )
+    p_cleanup.add_argument(
+        "sessions",
+        nargs="*",
+        help="Path delle session dir (default: tutte sotto outputs/).",
+    )
+    p_cleanup.add_argument(
+        "--apply",
+        action="store_true",
+        help="Cancella davvero i file (senza, è solo un'anteprima dry-run).",
+    )
+    p_cleanup.set_defaults(func=cmd_cleanup)
 
     parser.add_argument(
         "idea_positional",

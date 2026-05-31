@@ -29,6 +29,22 @@ def _get_lock(session: Path) -> threading.RLock:
         return lock
 
 
+# File intermedi 3D cancellabili da `cleanup_session`: pesanti e non serviti
+# dalla UI Objects (viewer = model.glb, download = model_printable.*). Sono
+# invece usati dai re-run CLI (decimate/flatten) e dai download Portraits,
+# quindi la cancellazione è on-demand — mai automatica nella pipeline.
+INTERMEDIATE_3D_FILES = (
+    "3d/model.stl",
+    "3d/model_repaired.stl",
+    "3d/model_repaired.3mf",
+    "3d/model_lowpoly.stl",
+    "3d/model_lowpoly.3mf",
+    "3d/model_meshy_repaired.glb",
+    "3d/model_meshy_repaired.stl",
+    "3d/model_repaired.glb",  # legacy: output Meshy /print/repair pre-rename
+)
+
+
 def _slugify(text: str, max_len: int = 40) -> str:
     text = unicodedata.normalize("NFKD", text).encode("ascii", "ignore").decode()
     text = re.sub(r"[^a-zA-Z0-9]+", "-", text).strip("-").lower()
@@ -132,3 +148,44 @@ def load_metadata(session: Path) -> dict:
     """Legge metadata.json sotto lock (consistent con writer concorrenti)."""
     with _get_lock(session):
         return json.loads((session / "metadata.json").read_text(encoding="utf-8"))
+
+
+def cleanup_session(session: Path, *, apply: bool = False) -> dict:
+    """Elenca (o cancella, se apply=True) gli intermedi 3D pesanti di una
+    sessione, tenendo `model.glb` (preview viewer) e `model_printable.{stl,3mf}`
+    (download finali) + images/references/prompts/metadata.
+
+    Guard: agisce solo se la pipeline è completa (`3d/model_printable.stl`
+    esiste), altrimenti ritorna `skipped=True` senza toccare nulla — protegge
+    sessioni image-only o pipeline parziali.
+
+    Ritorna `{"skipped": bool, "files": [(rel, bytes)...], "total_bytes": int}`.
+    Con `apply=True` cancella i file e pota i path stale da metadata.json.
+    """
+    if not (session / "3d" / "model_printable.stl").exists():
+        return {"skipped": True, "files": [], "total_bytes": 0}
+
+    found: list[tuple[str, int]] = []
+    for rel in INTERMEDIATE_3D_FILES:
+        p = session / rel
+        if p.exists():
+            found.append((rel, p.stat().st_size))
+    total = sum(sz for _, sz in found)
+
+    if apply and found:
+        for rel, _ in found:
+            (session / rel).unlink()
+        # Pota i riferimenti diventati stale (la UI Objects non li usa).
+        meta = load_metadata(session)
+        model_files = {
+            k: v for k, v in (meta.get("model_files") or {}).items() if k != "stl"
+        }
+        update_metadata(
+            session,
+            model_files=model_files,
+            repaired_files={},
+            lowpoly_files={},
+            meshy_repaired_files={},
+        )
+
+    return {"skipped": False, "files": found, "total_bytes": total}
