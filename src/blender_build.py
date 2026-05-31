@@ -21,6 +21,13 @@ from . import config, storage
 
 BLENDER_OUTPUTS_ROOT = config.OUTPUTS_ROOT / "blender"
 
+# Gate di convergenza (vedi skill blender-build §4): soglia di accettazione del
+# punteggio complessivo input↔output e numero massimo di iterazioni oltre il quale
+# la raccomandazione è sempre "stop" (evita rifiniture all'infinito). Costanti qui
+# così sono facili da ritoccare senza toccare la logica.
+ACCEPT_THRESHOLD = 85
+MAX_ITERATIONS = 2
+
 # Quadranti del grid 2x2 prodotti dalla pipeline Oggetti (vedi src/grid_utils.py
 # GRID_QUADRANTS). Sono le 4 viste di riferimento per la ricostruzione.
 VIEW_NAMES = ("front", "three_quarter", "side", "back")
@@ -161,6 +168,8 @@ def init_build_session(source_dir: Path) -> Path:
         "plan_path": "plan.json",
         "views": view_rel,
         "steps": [],
+        "iteration": 1,
+        "evaluations": [],
         "claude_usage": {"by_model": {}},
     }
     (build_dir / "metadata.json").write_text(
@@ -196,6 +205,147 @@ def final_paths(build_dir: Path) -> dict[str, str]:
         "blend": str(base / "final.blend"),
         "glb": str(base / "final.glb"),
         "stl": str(base / "final.stl"),
+    }
+
+
+def _load_metadata(build_dir: Path) -> dict:
+    return json.loads((build_dir / "metadata.json").read_text(encoding="utf-8"))
+
+
+def eval_paths(build_dir: Path, iteration: int | None = None) -> dict:
+    """Path ASSOLUTI degli artefatti del gate di convergenza per un'iterazione:
+    le 4 viste renderizzate del modello (da confrontare con refs/) e verdict.json,
+    sotto eval/iter_NN/. Crea la cartella. iteration default = metadata['iteration'].
+    """
+    if iteration is None:
+        iteration = _load_metadata(build_dir).get("iteration", 1)
+    base = (build_dir / "eval" / f"iter_{iteration:02d}").resolve()
+    base.mkdir(parents=True, exist_ok=True)
+    return {
+        "iteration": iteration,
+        "views": {name: str(base / f"{name}.png") for name in VIEW_NAMES},
+        "verdict": str(base / "verdict.json"),
+    }
+
+
+def _decide(overall_score, actionable_gaps, iteration: int) -> dict:
+    """Regola deterministica del gate: raccomanda 'reiterate' solo se il punteggio
+    è sotto soglia E ci sono gap azionabili E non si è raggiunto il cap iterazioni;
+    altrimenti 'stop' con motivazione esplicita. Ricalcolata qui, non delegata al
+    giudizio LLM."""
+    score = overall_score if isinstance(overall_score, (int, float)) else 0
+    has_gaps = bool(actionable_gaps)
+    if iteration >= MAX_ITERATIONS:
+        return {"recommendation": "stop",
+                "reason": f"cap iterazioni raggiunto (iteration={iteration} ≥ MAX_ITERATIONS={MAX_ITERATIONS})"}
+    if score >= ACCEPT_THRESHOLD:
+        return {"recommendation": "stop",
+                "reason": f"soglia raggiunta (overall_score={score} ≥ ACCEPT_THRESHOLD={ACCEPT_THRESHOLD})"}
+    if not has_gaps:
+        return {"recommendation": "stop",
+                "reason": f"nessun gap azionabile (overall_score={score})"}
+    return {"recommendation": "reiterate",
+            "reason": f"sotto soglia (overall_score={score} < {ACCEPT_THRESHOLD}) con {len(actionable_gaps)} gap azionabili"}
+
+
+def record_evaluation(build_dir: Path, verdict: dict) -> dict:
+    """Append atomico del verdict del gate a metadata['evaluations'], calcola la
+    raccomandazione deterministica (stop|reiterate) e porta lo stato a 'done' (il
+    gate si ferma sempre: è l'utente a decidere se rilanciare). Ritorna la decisione.
+    """
+    iteration = verdict.get("iteration")
+    if iteration is None:
+        iteration = _load_metadata(build_dir).get("iteration", 1)
+        verdict = {**verdict, "iteration": iteration}
+    decision = _decide(verdict.get("overall_score"), verdict.get("actionable_gaps") or [], iteration)
+    verdict = {**verdict, **decision}
+
+    def mutate(d: dict) -> None:
+        evals = d.setdefault("evaluations", [])
+        for i, e in enumerate(evals):
+            if e.get("iteration") == iteration:
+                evals[i] = verdict
+                break
+        else:
+            evals.append(verdict)
+        d["status"] = "done"
+
+    _patch_metadata(build_dir, mutate)
+    return {
+        "recommendation": decision["recommendation"],
+        "reason": decision["reason"],
+        "overall_score": verdict.get("overall_score"),
+        "iteration": iteration,
+    }
+
+
+def reinit_from_result(prev_build_dir: Path) -> dict:
+    """Crea una NUOVA build session che PARTE dal risultato precedente, per una
+    re-iterazione di rifinitura (su richiesta utente). Copia gli STESSI refs/ (input
+    invariati) e prev/final.blend → seed.blend; eredita source_session, incrementa
+    iteration, valorizza parent_build e planning_hints (gap dell'ultimo verdict).
+    """
+    prev_build_dir = prev_build_dir.resolve()
+    prev_meta = _load_metadata(prev_build_dir)
+    seed_src = prev_build_dir / "final.blend"
+    if not seed_src.exists():
+        raise FileNotFoundError(
+            f"Manca {seed_src}: la build precedente non ha un final.blend da cui ripartire."
+        )
+
+    iteration = int(prev_meta.get("iteration", 1)) + 1
+    ts = datetime.now().strftime("%Y%m%d-%H%M%S")
+    slug = storage._slugify(prev_meta.get("prompt") or prev_meta.get("source_session") or "blender-build")
+    build_dir = BLENDER_OUTPUTS_ROOT / f"{ts}-{slug}"
+    (build_dir / "prompts").mkdir(parents=True, exist_ok=True)
+    (build_dir / "refs").mkdir(parents=True, exist_ok=True)
+    (build_dir / "steps").mkdir(parents=True, exist_ok=True)
+
+    # input invariati: stessi 4 refs della build precedente
+    view_rel: dict[str, str] = {}
+    for name in VIEW_NAMES:
+        src_ref = prev_build_dir / "refs" / f"{name}.png"
+        if src_ref.exists():
+            shutil.copy2(src_ref, build_dir / "refs" / f"{name}.png")
+            view_rel[name] = f"refs/{name}.png"
+
+    # modello di partenza
+    shutil.copy2(seed_src, build_dir / "seed.blend")
+
+    # gap dell'ultima valutazione → hint di pianificazione
+    evals = prev_meta.get("evaluations") or []
+    hints = (evals[-1].get("actionable_gaps") if evals else None) or []
+
+    (build_dir / "prompts" / "00_source.txt").write_text(
+        f"# source session: {prev_meta.get('source_session')} (build iter {iteration}, "
+        f"da {prev_build_dir.name})\n\n{prev_meta.get('prompt', '')}\n",
+        encoding="utf-8",
+    )
+
+    metadata = {
+        "created_at": ts,
+        "kind": "blender_build",
+        "status": "planning",
+        "source_session": prev_meta.get("source_session"),
+        "prompt": prev_meta.get("prompt"),
+        "plan_path": "plan.json",
+        "views": view_rel,
+        "steps": [],
+        "iteration": iteration,
+        "evaluations": [],
+        "parent_build": str(prev_build_dir),
+        "seed_blend": "seed.blend",
+        "planning_hints": hints,
+        "claude_usage": {"by_model": {}},
+    }
+    (build_dir / "metadata.json").write_text(
+        json.dumps(metadata, indent=2, ensure_ascii=False), encoding="utf-8"
+    )
+    return {
+        "build_dir": str(build_dir),
+        "seed_blend": str((build_dir / "seed.blend").resolve()),
+        "iteration": iteration,
+        "hints": hints,
     }
 
 
@@ -270,6 +420,17 @@ def main(argv: list[str] | None = None) -> None:
     p.add_argument("build_dir")
     p.add_argument("value")
 
+    p = sub.add_parser("eval-paths", help="path assoluti render+verdict del gate (iterazione)")
+    p.add_argument("build_dir")
+    p.add_argument("iteration", type=int, nargs="?", default=None)
+
+    p = sub.add_parser("record-eval", help="registra il verdict del gate e ritorna la raccomandazione")
+    p.add_argument("build_dir")
+    p.add_argument("verdict_file")
+
+    p = sub.add_parser("reinit-from-result", help="nuova build di rifinitura che parte da final.blend")
+    p.add_argument("prev_build_dir")
+
     args = parser.parse_args(argv)
 
     if args.cmd == "init":
@@ -296,6 +457,13 @@ def main(argv: list[str] | None = None) -> None:
     elif args.cmd == "status":
         set_status(Path(args.build_dir), args.value)
         out = {"ok": True, "status": args.value}
+    elif args.cmd == "eval-paths":
+        out = eval_paths(Path(args.build_dir), args.iteration)
+    elif args.cmd == "record-eval":
+        verdict = json.loads(Path(args.verdict_file).read_text(encoding="utf-8"))
+        out = record_evaluation(Path(args.build_dir), verdict)
+    elif args.cmd == "reinit-from-result":
+        out = reinit_from_result(Path(args.prev_build_dir))
     else:  # pragma: no cover
         parser.error(f"comando sconosciuto: {args.cmd}")
 

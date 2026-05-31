@@ -1,6 +1,6 @@
 ---
 name: blender-build
-description: Costruisce in modo INCREMENTALE un modello 3D in Blender (live, via MCP) a partire dalla descrizione + 4 viste di una sessione Oggetti esistente. Un planner Opus crea il piano, poi executor Sonnet in sequenza applicano ogni step privilegiando gli strumenti automatici di Blender (primitive + modifier), si auto-verificano via screenshot e salvano uno snapshot .blend per modifica. USARE quando l'utente chiede di "costruire/modellare in Blender" un oggetto da una sessione esistente. PRECONDIZIONE: Blender aperto e connesso al server MCP (porta 9876).
+description: Costruisce in modo INCREMENTALE un modello 3D in Blender (live, via MCP) a partire dalla descrizione + 4 viste di una sessione Oggetti esistente. Parte in AUTO MODE all'invocazione (gira end-to-end senza chiedere conferme). Un planner Opus (thinking medio) crea il piano focalizzato su GEOMETRIA e SIMMETRIA (materiali/colori secondari), poi executor Sonnet in sequenza applicano ogni step privilegiando gli strumenti automatici di Blender (primitive + modifier), si auto-verificano via screenshot ripetendo fino a 3 volte se il risultato non è soddisfacente, e salvano uno snapshot .blend per modifica. Termina con un GATE DI CONVERGENZA che confronta input↔output (metriche oggettive in Blender + giudizio visivo sulle 4 viste) e raccomanda in modo deterministico se fermarsi o ri-partire dal risultato; si ferma sempre lasciando la decisione all'utente. USARE quando l'utente chiede di "costruire/modellare in Blender" un oggetto da una sessione esistente. PRECONDIZIONE: Blender aperto e connesso al server MCP (porta 9876).
 ---
 
 # blender-build — costruzione 3D incrementale live in Blender
@@ -16,6 +16,21 @@ Niente IO a mano: usa sempre la CLI per init/plan/paths/record/status.
 Argomento della skill: il path della sessione Oggetti sorgente (es.
 `outputs/20260529-...-teapot`). Se manca, chiedi all'utente quale sessione usare.
 
+## Auto mode (default all'invocazione)
+
+Quando la skill viene invocata, esegui l'**intera pipeline in autonomia** —
+preflight → piano → tutti gli step in sequenza → chiusura → **gate di convergenza** —
+**senza fermarti a chiedere conferma** tra una fase e l'altra né tra uno step e il
+successivo. Non chiedere "vuoi che proceda?": procedi. Al gate (§4) la pipeline **si ferma
+sempre** col verdetto e la raccomandazione: NON riavvia da sola; la re-iterazione (§5) parte
+solo se l'utente la chiede.
+
+Restano gli unici punti in cui ti fermi (sicurezza / perdita dati):
+- **Preflight fallito** (Blender non connesso) → fermati e istruisci l'utente (vedi §0.1).
+- **Scena con lavoro esistente dell'utente** da cancellare → chiedi conferma (perdita dati).
+  Scena con soli oggetti di default → pulisci senza chiedere (vedi §0.2).
+- **Path sessione sorgente mancante** → chiedi quale sessione usare.
+
 ## 0. Preflight (OBBLIGATORIO — la pipeline gira SOLO con Blender connesso)
 
 1. Chiama `mcp__blender__get_scene_info`.
@@ -23,12 +38,16 @@ Argomento della skill: il path della sessione Oggetti sorgente (es.
      apri Blender, abilita l'addon `tools/blender_mcp_addon.py`, e nel panel laterale
      "BlenderMCP" clicca **Connect to MCP server** (porta 9876). Non creare nessuna build
      session finché il preflight non passa.
-2. Se la scena contiene gli oggetti di default (Cube/Light/Camera) e l'utente parte da
-   scena vuota, puoi ripulire via `execute_code`
+2. Se la scena contiene SOLO gli oggetti di default (Cube/Light/Camera), in auto mode
+   ripuliscila senza chiedere via `execute_code`
    (`bpy.ops.object.select_all(action='SELECT'); bpy.ops.object.delete()`). Chiedi conferma
-   se la scena contiene già lavoro dell'utente.
+   SOLO se la scena contiene già lavoro dell'utente (perdita dati).
 
-## 1. Passata 1 — PIANO (planner = Opus, lo fai TU nel main loop, "al massimo")
+## 1. Passata 1 — PIANO (planner = Opus, lo fai TU nel main loop, thinking MEDIO)
+
+Pianifica con **sforzo di ragionamento medio**, non estremo: la pianificazione è
+decomposizione in step + scelta degli strumenti automatici, non richiede thinking massimo.
+Il budget di ragionamento più alto va semmai speso dagli executor sugli step rischiosi.
 
 1. Bootstrap della build session:
    ```
@@ -48,7 +67,7 @@ Argomento della skill: il path della sessione Oggetti sorgente (es.
    ```json
    {
      "source_session": "<name>",
-     "strategy": "naming oggetti coerente col piano; modifier non-distruttivi tenuti vivi; build incrementale coarse→fine; NIENTE editing manuale per-vertice",
+     "strategy": "PRIORITÀ a geometria e simmetria: silhouette corretta, proporzioni, MIRROR sugli assi di simmetria; materiali/colori sono rifinitura finale opzionale, non il focus. Naming oggetti coerente col piano; modifier non-distruttivi tenuti vivi; build incrementale coarse→fine; NIENTE editing manuale per-vertice",
      "steps": [
        {
          "id": 1,
@@ -65,6 +84,9 @@ Argomento della skill: il path della sessione Oggetti sorgente (es.
    }
    ```
    Linee guida per il piano:
+   - **Priorità: forma e simmetria prima di tutto.** Cattura silhouette e proporzioni
+     corrette, usa `MIRROR` sugli assi di simmetria dell'oggetto. Materiali e colori sono
+     secondari e facoltativi (eventuale step finale): non costruire il piano attorno ad essi.
    - 5–15 step tipicamente. Primo step = volume base; ultimi step = dettagli/smussi.
    - Ogni step deve essere **applicabile da solo** sopra lo stato dello step precedente.
    - Indica `reference_views` pertinenti (quali viste verificare per quello step).
@@ -94,15 +116,17 @@ Per ogni step in ordine:
    ```
 4. Passa allo step successivo.
 
-**Best-effort** (come la pipeline SCAD): se uno step non converge entro i retry, salva il
-miglior tentativo, marca `status: "failed"` nel record con le note, e **prosegui** — lo
-storico resta completo.
+**Best-effort** (come la pipeline SCAD): se uno step non converge entro i **3 tentativi**,
+salva il miglior tentativo, marca `status: "failed"` nel record con le note, e **prosegui**
+— lo storico resta completo.
 
 ### Template prompt per l'executor (Sonnet)
 
 > Sei un executor specializzato in modellazione Blender via MCP. Applichi **un solo step**
 > di un piano a una scena Blender già avviata. Usa SEMPRE strumenti automatici (primitive +
-> modifier), MAI editing manuale coordinata-per-vertice.
+> modifier), MAI editing manuale coordinata-per-vertice. Il tuo focus è **geometria e
+> simmetria** (forma, proporzioni, MIRROR sugli assi): materiali e colori sono secondari e
+> facoltativi — NON spendere tentativi per perfezionarli.
 >
 > PIANO COMPLETO (contesto): {plan.json}
 > STEP DA APPLICARE: {step}
@@ -116,9 +140,14 @@ storico resta completo.
 >    (non applicarli) salvo che il piano lo richieda.
 > 3. Verifica: per ogni vista in `reference_views`, imposta l'angolo
 >    (`bpy.ops.view3d.view_axis(type=...)` — FRONT/RIGHT/BACK; per three_quarter orbita una
->    vista 3/4), poi `mcp__blender__get_viewport_screenshot`. Confronta con la vista di
->    riferimento e con `acceptance`.
-> 4. RETRY (max 3): se non combacia, correggi il codice (annulla/aggiusta) e riprova.
+>    vista 3/4), poi `mcp__blender__get_viewport_screenshot`. Giudica **forma e simmetria**
+>    (silhouette, proporzioni, simmetria sugli assi) rispetto alla vista di riferimento e a
+>    `acceptance` — NON il colore/materiale.
+> 4. RIPETI fino a un **massimo di 3 tentativi** finché il risultato non è soddisfacente
+>    (soddisfacente = silhouette/simmetria combaciano con le `reference_views` e `acceptance`
+>    è rispettata). A ogni retry: ricarica l'ultimo `.blend` buono (NON `bpy.ops.ed.undo`) o
+>    aggiusta i parametri, poi ri-verifica via screenshot. Solo dopo il 3° tentativo non
+>    soddisfacente → procedi col miglior tentativo e marca `status: "failed"`.
 > 5. Su esito accettabile: salva snapshot e export via `execute_code`:
 >    `bpy.ops.wm.save_as_mainfile(filepath=<blend>, copy=True)` e
 >    export GLB su `<glb>` (`bpy.ops.export_scene.gltf(filepath=<glb>)`). Salva lo
@@ -139,10 +168,100 @@ uv run python -m src.blender_build final-paths <build_dir>
 poi via `execute_code`: `save_as_mainfile(filepath=final.blend)`, export GLB su `final.glb`,
 export STL su `final.stl` (`bpy.ops.export_mesh.stl(filepath=final.stl)` o l'export STL
 disponibile nella versione di Blender). Infine:
+Export fatti, **NON** riassumere ancora: prosegui col **gate di convergenza (§4)**. Lo stato
+`done` lo imposta il gate (`record-eval`), non qui.
+
+## 4. Gate di convergenza (confronto input↔output → stop o re-itera)
+
+Step finale **ingegneristico**: confronta gli input (descrizione + 4 viste `refs/`) con
+l'output (il modello, ancora in scena dopo la chiusura) in modo **misurabile** e decide se
+fermarsi o ri-partire dal risultato. Confronto **ibrido**: metriche oggettive + giudizio
+visivo per-vista, **focalizzato su geometria e simmetria** (NON colore).
+
+1. Path artefatti del gate:
+   ```
+   uv run python -m src.blender_build eval-paths <build_dir>
+   ```
+   → `{"iteration": N, "views": {front,three_quarter,side,back → png assoluti}, "verdict": "...abs..."}`
+   (tutto sotto `eval/iter_NN/`).
+2. **Metriche oggettive in Blender** (`execute_code`, numeri non occhio):
+   - bbox in mm vs `target_mm` (le quote-target dal prompt/`strategy`, es. 89×130×3) →
+     `proportion_error_pct`.
+   - **scarto di simmetria per asse**: specchia la mesh sull'asse di simmetria e misura lo
+     scostamento (mm) → `symmetry_dev_mm` per asse.
+   - `watertight` (già verificato in chiusura con trimesh): riportalo.
+3. **Render pulito delle 4 viste** del modello: SOLID, overlay/gizmo OFF, orientamento da
+   `view_axis` (FRONT/RIGHT/BACK; per `three_quarter` orbita una 3/4), `view_selected`, poi
+   `get_viewport_screenshot` salvando in `views[...]` di `eval-paths`.
+4. **Giudizio visivo per-vista** — lancia **un** subagent giudice (Sonnet) col **template
+   giudice** sotto: per ogni vista confronta il render con `refs/<view>.png` su
+   **silhouette/forma/proporzioni/simmetria** (NON colore) → `score` 0–100 + note +
+   `actionable_gaps` geometrici concreti.
+5. Componi `verdict.json` nel path `verdict` (schema sotto: metriche + per-vista +
+   `overall_score` + `actionable_gaps`), poi:
+   ```
+   uv run python -m src.blender_build record-eval <build_dir> <verdict.json>
+   ```
+   → ritorna la **raccomandazione deterministica** `{"recommendation":"stop|reiterate","reason":...,"overall_score":N,"iteration":N}`
+   (regola nel helper: soglia `ACCEPT_THRESHOLD=85` e cap `MAX_ITERATIONS=2`; non delegata
+   all'LLM). Imposta `status=done`.
+6. **Riporta all'utente e FERMATI** (sempre): tabella punteggi per-vista, metriche oggettive,
+   `actionable_gaps`, e la raccomandazione + motivazione. Se `reiterate`, di' all'utente che
+   può rilanciare partendo dal risultato (§5) e quali gap verrebbero corretti.
+
+Schema `verdict.json`:
+```json
+{
+  "iteration": 1,
+  "metrics": {"bbox_mm": [89.0,3.03,130.0], "target_mm": [89,130,3],
+              "proportion_error_pct": 1.2, "symmetry_dev_mm": {"x":0.0,"z":0.4},
+              "watertight": true},
+  "views": [{"view":"front","score":92,"notes":"..."}, {"view":"side","score":88,"notes":"..."}],
+  "overall_score": 90,
+  "actionable_gaps": ["bordo inferiore ~2 mm troppo spesso vs ref", "apertura top leggermente stretta"]
+}
 ```
-uv run python -m src.blender_build status <build_dir> done
+
+### Template prompt per il giudice (Sonnet)
+
+> Sei un giudice di fedeltà geometrica. Confronti il MODELLO 3D renderizzato con le VISTE DI
+> RIFERIMENTO di un oggetto, **solo su forma**: silhouette, proporzioni, simmetria, presenza/
+> posizione delle feature geometriche. IGNORA colori, materiali, illuminazione, sfondo.
+>
+> Per ogni vista ti do due immagini: il render del modello e la `ref` corrispondente. Aprile
+> con Read. Per ciascuna vista assegna uno `score` 0–100 (100 = silhouette/proporzioni/
+> simmetria coincidono) e note brevi. Poi elenca `actionable_gaps`: differenze GEOMETRICHE
+> concrete e correggibili (es. "bordo inferiore troppo spesso", "spigolo non smussato",
+> "proporzione altezza/larghezza errata"), non estetiche.
+>
+> VISTE (render ↔ ref): {front: <render> ↔ <refs/front.png>, ...}
+> METRICHE OGGETTIVE (contesto): {bbox_mm, target_mm, symmetry_dev_mm, watertight}
+>
+> RITORNA come testo finale SOLO questo JSON:
+> `{"views":[{"view":"front","score":N,"notes":"..."}, ...], "overall_score":N,
+>   "actionable_gaps":["...", "..."]}`
+> dove `overall_score` è la tua sintesi pesata (penalizza forte gli errori di proporzione e
+> simmetria). Niente altro testo.
+
+## 5. Re-iterazione (su richiesta utente — parte DAL risultato)
+
+Se (e solo se) l'utente chiede di rilanciare dopo una raccomandazione `reiterate`, **NON
+ripartire da zero**: si riparte dal modello ottenuto.
 ```
-Riassumi all'utente: build dir, numero step, eventuali step falliti, path di `final.*`.
+uv run python -m src.blender_build reinit-from-result <prev_build_dir>
+```
+→ crea una NUOVA build con `seed.blend` (= `final.blend` precedente), gli **stessi `refs/`**
+(input invariati), `iteration` incrementata, `parent_build` e `planning_hints` (= gli
+`actionable_gaps` dell'ultimo verdict).
+
+Poi esegui la pipeline normale (§1–§4) con due differenze:
+- Il **piano è di rifinitura**: lo **step 1 NON crea primitive** ma carica il modello —
+  `bpy.ops.wm.open_mainfile(filepath=<seed.blend assoluto>)` — e gli step successivi
+  **mirano ai `planning_hints`** (i gap da chiudere), restando su geometria/simmetria.
+- Salta la pulizia scena del preflight (il seed È la scena di partenza).
+
+A fine pipeline gira un nuovo gate (§4); le iterazioni restano tracciate in metadata
+(`iteration`, `parent_build`, `evaluations`).
 
 ## Toolbox automatico Blender (preferenze — privilegiare SEMPRE l'automatico)
 
@@ -151,6 +270,8 @@ Riassumi all'utente: build dir, numero step, eventuali step falliti, path di `fi
 - **Modifier non-distruttivi**: `MIRROR`, `SUBSURF`, `BEVEL`, `SOLIDIFY`, `BOOLEAN`,
   `ARRAY`, `SCREW`, `SKIN`, `REMESH`, `SHRINKWRAP`, `LATTICE`, `CAST`, `SIMPLE_DEFORM`.
   (Aggiungi via `obj.modifiers.new(name, TYPE)` e configura le proprietà.)
+  **`MIRROR` è il default per ogni oggetto simmetrico**: modella metà e specchia sull'asse
+  → simmetria perfetta e gratuita, niente disallineamenti.
 - **Operatori**: `object.join`, `duplicate`, parent/transform, `object.shade_smooth`,
   auto-smooth, proportional edit; per forme organiche `sculpt` + remesh.
 - **VIETATO** (salvo banalità): posizionare/spostare vertici singoli a mano. Per forma fine
@@ -168,7 +289,10 @@ Principi generali (dettaglio + esempi in memoria `reference_blender_build_lesson
 - **NON usare `bpy.ops.ed.undo`** (crasha l'MCP): per annullare ricarica l'ultimo `.blend`.
 - **Diagnostica**: 3 viste (FRONT/RIGHT/3-4), viewport pulito; itera i parametri estetici GUARDANDO gli screenshot. Material Preview sovraespone → abbassa `studiolight_intensity`.
 - **Manifold**: EDIT → `remove_doubles` + `normals_make_consistent` + `select_non_manifold`→`fill_holes`; verifica contando gli edge non-manifold.
-- **Estetica premium**: matte (no metallic lucido), pochi toni; trame pulite > trame "spinose".
+- **Focus = geometria e simmetria, non materiali/colori.** Spendi i tentativi su silhouette,
+  proporzioni e simmetria (MIRROR sugli assi), non sull'estetica dei materiali. Materiali e
+  colori sono una rifinitura finale opzionale. *Se e quando* li applichi: matte (no metallic
+  lucido), pochi toni; trame pulite > trame "spinose" — ma è secondario.
 
 ## Note operative
 
