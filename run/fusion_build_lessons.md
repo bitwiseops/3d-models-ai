@@ -1,0 +1,100 @@
+# fusion-build — pattern per la modellazione parametrica in Fusion 360 via MCP (knowledge base versionato)
+
+Principi e gotcha per la modellazione 3D **parametrica / B-rep** in Fusion 360 via MCP
+(esecuzione di codice `adsk.*` sulla coda main-thread dell'add-in), **da accumulare run dopo
+run**. Questo file è **versionato** (vive in `run/`, non nell'auto-memory fuori repo) ed è
+**scrivibile dal contesto RUN** (non è sotto `run/.claude/skills/`, che è read-only): quando
+durante una run emerge un nuovo problema/soluzione, **aggiungilo qui** e committa.
+
+> ⚠️ **Seed iniziale, NON ancora validato su Fusion reale.** Il progetto è stato scritto e rivisto
+> su Linux, dove Fusion non gira. Le voci sotto sono principi noti dell'API/del paradigma Fusion e
+> i vincoli del server MCP — vanno **confermati ed estesi sul Mac** alla prima run (vedi
+> `run/.claude/skills/fusion-build/SETUP_MACOS.md`). Marca come `[da confermare]` ciò che non hai
+> ancora verificato in prima persona; togli il marcatore quando l'hai visto funzionare.
+
+Valgono per qualunque ricostruzione procedurale parametrica in Fusion guidata da MCP.
+
+## Vincoli HARD del backend (non negoziabili)
+- **API non thread-safe → coda main-thread.** Ogni operazione gira sul main thread dell'add-in
+  (gestito dal server). Non tentare concorrenza.
+- **Una operazione logica per chiamata, attesa.** Niente operazioni sovrapposte/batch in una sola
+  chiamata: fa crashare l'add-in. Gli executor sono **rigorosamente in sequenza**.
+- **Budget ~30s per chiamata.** Spezza gli step pesanti (timeline lunga, molte feature) in script
+  più piccoli e fai snapshot `.f3d` tra l'uno e l'altro. Niente loop enormi in un singolo script.
+- **Unità interne = centimetri.** 1 mm = 0.1 cm. Scrivi le quote in cm, tonde e proporzionali; il
+  gate converte la bbox cm→mm (×10).
+- **Annullare = riaprire l'ultimo `.f3d` buono** o riportare indietro il marker della timeline e
+  cancellare le feature successive. NON affidarti a comandi di undo programmatici.
+
+## Esattezza per costruzione (il senso del backend parametrico)
+- **Sketch vincolato e quotato → extrude/revolve.** La silhouette giusta nasce dai **vincoli**
+  dello sketch (geometrici + dimensionali), non da aggiustamenti a valle. Punta a sketch
+  *fully-constrained* (nessun grado di libertà residuo) per geometria ripetibile.
+- **Solidi di rivoluzione = Revolve, non mesh.** Corpo teiera, bottiglia, coperchio, manopole:
+  disegna la **metà-sezione** del profilo su un piano che contiene l'asse e fai **Revolve 360°**
+  attorno all'asse. Esatto e simmetrico per costruzione.
+- **Prismi/estrusi = Extrude** di un profilo chiuso. Per spessori sottili o gusci: **Shell**.
+- **Transizioni di sezione = Loft/Sweep** (es. beccuccio che cambia profilo lungo un percorso).
+
+## Simmetria
+- **Mirror feature sul piano di simmetria** è il default per gli oggetti simmetrici (analogo del
+  MIRROR di Blender): modella metà, specchia → simmetria perfetta e parametrica, nessun
+  disallineamento. Usa i piani base (XY/XZ/YZ) o un piano-feature costruito.
+- Per ripetizioni regolari (manici multipli, fori in cerchio): **Circular/Rectangular Pattern**,
+  non copie posizionate a mano.
+
+## Assieme e posizionamento — JOINTS, non trasformazioni [da confermare in dettaglio sul Mac]
+- **Ogni parte = un Component proprio**, creato all'origine del suo sketch; poi posizionato
+  **relativamente** al target con un **Joint**. È il punto della migrazione: l'intento relativo
+  sopravvive alle modifiche parametriche.
+- **VIETATO posizionare con `occurrence.transform2` (matrice mondo assoluta).** Bakera la
+  posizione e annulla il vantaggio parametrico. Trasformazione transitoria solo come fallback
+  ultimo e documentato.
+- **Riferimenti stabili = JointOrigin** su facce/spigoli/punti nominati (o piani-feature), non
+  indici di facce volatili che cambiano alla rigenerazione.
+- Mappa relazioni del manifest → joint:
+  - `concentric_with`/coaxial → **Cylindrical**/**Rigid** su spigoli/assi concentrici.
+  - `on_top_of`/`flush_with` → **Planar** tra le facce a contatto (offset 0 = a filo).
+  - `attached_to` → **Rigid** con JointOrigin coincidenti.
+  - `inside` → **concentric** + **planar** con offset per sedere dentro.
+  - `symmetric_to` → **Mirror feature** sul piano di simmetria.
+- **Gotcha atteso [da confermare]:** scegliere la *geometria* di joint giusta da geometria appena
+  creata è la parte fragile. Crea JointOrigin espliciti **subito dopo** aver creato la faccia/asse
+  di interesse, mentre il riferimento è "fresco"; non rimandare a dopo altre feature.
+
+## Dettagli = feature native, non editing mesh
+- **Raccordi = Fillet**, **smussi = Chamfer**, **fori = Hole** (con tipo/diametro nativi),
+  **scanalature = revolve-cut** o extrude-cut di un profilo. Niente boolean su mesh.
+- Applica i dettagli **dopo** che la forma base e i joints sono a posto (step finali del piano).
+
+## Render di verifica (pose ESATTE, apples-to-apples col gate)
+- Convenzione di build: **up = +Z, "fronte" verso −Y.** Le 4 pose canoniche (`VIEW_CAMERA` in
+  `src/fusion_build.py`): front=sguardo +Y, side=−X, back=−Y (ortografiche), three_quarter=iso.
+- Imposta `app.activeViewport.camera` (`eye`/`target`/`upVector`, `cameraType`),
+  `camera.isFitView=True` o `viewport.fit()`, **riassegna** `viewport.camera = camera` (in Fusion
+  la camera va riassegnata perché abbia effetto [da confermare]), poi
+  `viewport.saveAsImageFile(path, w, h)`.
+- **Usa le STESSE pose negli step e nel gate**, così i render combaciano coi `refs/`.
+- [da confermare] Per render più leggibili (feature visibili al giudice) valuta visual style
+  "shaded with edges" e isolamento overlay; evita un grigio piatto che appiattisce il contrasto
+  (stesso rischio visto in blender-build).
+
+## Metriche del gate
+- **bbox**: da `body.boundingBox`/bbox del component, in **cm** → ×10 = mm, confronta con
+  `target_mm` → `proportion_error_pct`.
+- **watertight**: i solidi B-rep sono chiusi per costruzione (`body.isSolid`); per parità di
+  calcolo col gate di blender-build, esporta STL e verifica con trimesh
+  (`is_watertight`/`is_winding_consistent`).
+- **simmetria**: misura lo scostamento rispetto al piano di simmetria (bbox simmetrica o confronto
+  specchiato) in mm per asse.
+
+## Export
+- Snapshot per modifica: salva il design come **`.f3d`** (Fusion Archive) via export manager.
+- Finali: **STEP** (`final.step`) per CAD a valle e **STL** (`final.stl`) per mesh/stampa.
+- I path passati a Fusion sono **assoluti** (stessa macchina di Claude Code).
+
+## Processo (design iterativo)
+- Build incrementale coarse→fine; verifica a schermo (render salvati) a ogni step rischioso.
+- Essendo **parametrico**, in re-iterazione spesso basta **modificare le quote** di
+  sketch/feature esistenti invece di ricostruire da zero (riparti da `seed.f3d`).
+- Salva snapshot `.f3d` a ogni step (storico) e, per le metriche, esporta STL e ri-verificalo.

@@ -3,6 +3,7 @@
     "allow": [
       "mcp__blender__execute_blender_code",
       "mcp__blender__get_viewport_screenshot",
+      "mcp__fusion__execute_fusion_code",
       "Bash(uv run *)"
     ],
     "deny": [
@@ -16,5 +17,5 @@
       "Edit(/home/bitwise/Projects/3d-models-ai/pyproject.toml)"
     ]
   },
-  "enabledMcpjsonServers": ["blender"]
+  "enabledMcpjsonServers": ["blender", "fusion"]
 }

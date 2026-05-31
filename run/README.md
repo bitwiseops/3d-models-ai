@@ -37,6 +37,22 @@ config.OUTPUTS_ROOT/"blender"` indipendentemente dalla cwd, quindi funziona iden
 La skill prende come argomento il path della sessione Oggetti sorgente. Lanciando da `run/`,
 passalo **assoluto** oppure relativo alla cwd `run/` (es. `../outputs/<session>`).
 
+## Skill sorella: `fusion-build` (Fusion 360, solo macOS/Windows)
+
+Oltre a `blender-build`, in `run/.claude/skills/` vive `fusion-build`: una **copia-e-adatta**
+della stessa pipeline con backend CAD = **Fusion 360** (geometria parametrica B-rep:
+sketch→extrude/revolve, relazioni realizzate come **joints**, non trasformazioni). È una skill
+**indipendente** — `blender-build` resta invariato. Il suo helper deterministico è
+`src/fusion_build.py` (artefatti in `outputs/fusion/<ts-slug>/`) e usa il server MCP `fusion`
+(in `run/.mcp.json`, abilitato in `run/.claude/settings.json`).
+
+⚠️ Fusion gira solo su **macOS/Windows**: l'add-in, il bridge MCP e qualunque run reale **non
+sono eseguibili né verificabili su Linux**. Setup add-in + MCP e la **checklist di verifica lato
+Mac** sono in `run/.claude/skills/fusion-build/SETUP_MACOS.md`. Il placeholder MCP nel repo
+(`uvx fusion360-mcp-server`) e il nome tool `mcp__fusion__execute_fusion_code` vanno **confermati
+e, se serve, corretti sul Mac** in base al server scelto. Le lezioni Fusion stanno in
+`run/fusion_build_lessons.md`.
+
 ## Note
 
 - Modifiche a MCP / skill / settings richiedono un **riavvio** di Claude dalla cwd giusta per
