@@ -162,9 +162,10 @@ def init_build_session(source_dir: Path) -> Path:
     metadata = {
         "created_at": ts,
         "kind": "blender_build",
-        "status": "planning",
+        "status": "parsing",
         "source_session": src["source_session"],
         "prompt": src["prompt"],
+        "manifest_path": "manifest.json",
         "plan_path": "plan.json",
         "views": view_rel,
         "steps": [],
@@ -176,6 +177,57 @@ def init_build_session(source_dir: Path) -> Path:
         json.dumps(metadata, indent=2, ensure_ascii=False), encoding="utf-8"
     )
     return build_dir
+
+
+def save_manifest(build_dir: Path, manifest: dict) -> dict:
+    """Salva il part-manifest (output dello stadio di parsing percettivo, §1) e
+    porta lo stato 'parsing' → 'planning'. Il manifest è la SINGLE SOURCE OF TRUTH
+    su COSA deve esistere: il planner e gli executor consumano questo, non
+    ri-ragionano dalle immagini.
+
+    Validazione deterministica leggera: `parts` lista non vuota, ogni parte con
+    `id` e `primitive_type` (gli `id` devono essere unici). Ritorna gli id delle
+    parti e le `open_questions` così l'orchestratore può loggarle.
+    """
+    parts = manifest.get("parts")
+    if not isinstance(parts, list) or not parts:
+        raise ValueError("manifest non valido: 'parts' deve essere una lista non vuota.")
+    ids: list[str] = []
+    for i, p in enumerate(parts):
+        pid = p.get("id")
+        if not pid or not p.get("primitive_type"):
+            raise ValueError(
+                f"manifest non valido: parte #{i} senza 'id' o 'primitive_type'."
+            )
+        if pid in ids:
+            raise ValueError(f"manifest non valido: id duplicato '{pid}'.")
+        ids.append(pid)
+
+    path = build_dir / "manifest.json"
+    path.write_text(json.dumps(manifest, indent=2, ensure_ascii=False), encoding="utf-8")
+    _patch_metadata(build_dir, lambda d: d.update(status="planning"))
+    return {
+        "manifest_path": str(path),
+        "part_ids": ids,
+        "open_questions": manifest.get("open_questions") or [],
+    }
+
+
+def plan_coverage(build_dir: Path, plan: dict) -> list[str]:
+    """Cross-check di copertura piano↔manifest: ritorna gli id delle parti del
+    manifest che NESSUNO step copre (campo `manifest_parts` dello step). Le parti
+    irrisolte stanno in `open_questions` (testo libero, non id), quindi questo è un
+    avviso — non un errore: feature potenzialmente droppate, da rivedere prima di
+    costruire. Se non c'è manifest ritorna [] (retro-compatibile)."""
+    manifest_path = build_dir / "manifest.json"
+    if not manifest_path.exists():
+        return []
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    part_ids = {p.get("id") for p in (manifest.get("parts") or []) if p.get("id")}
+    covered: set = set()
+    for step in plan.get("steps") or []:
+        covered.update(step.get("manifest_parts") or [])
+    return sorted(part_ids - covered)
 
 
 def save_plan(build_dir: Path, plan: dict) -> Path:
@@ -312,6 +364,13 @@ def reinit_from_result(prev_build_dir: Path) -> dict:
     # modello di partenza
     shutil.copy2(seed_src, build_dir / "seed.blend")
 
+    # manifest invariato: il part-manifest descrive COSA deve esistere e non
+    # cambia tra iterazioni (come i refs). Copialo se la build precedente ce l'ha.
+    prev_manifest = prev_build_dir / "manifest.json"
+    has_manifest = prev_manifest.exists()
+    if has_manifest:
+        shutil.copy2(prev_manifest, build_dir / "manifest.json")
+
     # gap dell'ultima valutazione → hint di pianificazione
     evals = prev_meta.get("evaluations") or []
     hints = (evals[-1].get("actionable_gaps") if evals else None) or []
@@ -328,6 +387,7 @@ def reinit_from_result(prev_build_dir: Path) -> dict:
         "status": "planning",
         "source_session": prev_meta.get("source_session"),
         "prompt": prev_meta.get("prompt"),
+        "manifest_path": "manifest.json" if has_manifest else None,
         "plan_path": "plan.json",
         "views": view_rel,
         "steps": [],
@@ -401,6 +461,10 @@ def main(argv: list[str] | None = None) -> None:
     p = sub.add_parser("inputs", help="stampa prompt + path viste della sorgente")
     p.add_argument("source_dir")
 
+    p = sub.add_parser("save-manifest", help="salva manifest.json (da file) e stato=planning")
+    p.add_argument("build_dir")
+    p.add_argument("manifest_file")
+
     p = sub.add_parser("save-plan", help="salva plan.json (da file) e stato=building")
     p.add_argument("build_dir")
     p.add_argument("plan_file")
@@ -443,9 +507,16 @@ def main(argv: list[str] | None = None) -> None:
             "source_session": src["source_session"],
             "views": {k: str(v) for k, v in src["views"].items()},
         }
+    elif args.cmd == "save-manifest":
+        manifest = json.loads(Path(args.manifest_file).read_text(encoding="utf-8"))
+        out = save_manifest(Path(args.build_dir), manifest)
     elif args.cmd == "save-plan":
         plan = json.loads(Path(args.plan_file).read_text(encoding="utf-8"))
-        out = {"plan_path": str(save_plan(Path(args.build_dir), plan))}
+        build_dir = Path(args.build_dir)
+        out = {
+            "plan_path": str(save_plan(build_dir, plan)),
+            "uncovered_parts": plan_coverage(build_dir, plan),
+        }
     elif args.cmd == "paths":
         out = step_paths(Path(args.build_dir), args.step_id)
     elif args.cmd == "final-paths":
