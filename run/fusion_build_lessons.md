@@ -21,6 +21,13 @@ Valgono per qualunque ricostruzione procedurale parametrica in Fusion guidata da
   chiamata: fa crashare l'add-in. Gli executor sono **rigorosamente in sequenza**.
 - **Budget ~30s per chiamata.** Spezza gli step pesanti (timeline lunga, molte feature) in script
   più piccoli e fai snapshot `.f3d` tra l'uno e l'altro. Niente loop enormi in un singolo script.
+- **🛑 MAI loop non limitati (`while True`) che mutano la geometria.** Ogni `deleteMe()`/feature
+  rigenera il modello: un `while True: body.deleteMe()` su molti body **appende l'app** (CPU 100%,
+  l'MCP va in timeout, serve force-quit di Fusion). Visto in run 2026-05-31 iter3: l'add-in si e
+  bloccato e ha richiesto riavvio manuale. Regola: per cancellare in blocco, **snapshot dei nomi
+  in una lista e poi un solo passaggio** (`for b in [x for x in root.bRepBodies if cond]: b.deleteMe()`),
+  mai un loop che ricontrolla `bRepBodies` dopo ogni delete. Metti sempre un **cap esplicito** ai
+  loop e preferisci operazioni batch.
 - **Unità interne = centimetri.** 1 mm = 0.1 cm. Scrivi le quote in cm, tonde e proporzionali; il
   gate converte la bbox cm→mm (×10).
 - **Annullare = riaprire l'ultimo `.f3d` buono** o riportare indietro il marker della timeline e
@@ -129,6 +136,22 @@ overall=60 (reiterate). Gotcha **confermati e nuovi**:
   rectangular pattern verticale + **circular pattern di body** attorno a Z. Tieni i conteggi
   moderati (~13 colonne × 3 file) per il budget ~30s; converge meglio spezzando cut e pattern in
   chiamate separate con snapshot.
+- **🛑 Honeycomb = UN SOLO set di esagoni in file a mattoncino, NON due set sovrapposti.** Per il
+  nido d'ape l'offset tra file adiacenti e SOLO orizzontale (mezzo passo), sempre lo *stesso* set
+  di celle. Errore visto (run 2026-05-31 iter3): aggiungere un **secondo set** di esagoni sfalsato
+  di mezzo passo in z *e* in angolo → il secondo set cade esattamente sui setti del primo e li
+  **mangia**, lasciando una parete svuotata con frammenti "a farfalla" disconnessi (non un
+  traliccio). Dimensiona così che **passo > dimensione esagono** (setti residui ≥ ~0.3 cm) e
+  verifica sul render che resti un **reticolo connesso** (non vuoto, non pieno). Se vedi frammenti
+  volanti → esagoni troppo grandi/sovrapposti: riduci la cella o aumenta il passo e rifai dal
+  solido. Per "traliccio" (celle grandi, parete per lo piu aperta) servono comunque setti integri.
+- **Cut multi-target che lascia un tool fantasma.** Combine-Cut con `isKeepToolBodies=True` su piu
+  body (es. 8 astine) lascia il **tool body** nel modello: non e cancellabile finche i combine lo
+  referenziano (`deleteMe` ritorna True ma no-op; editare il combine da `3 : Didn't roll editing
+  feature back`). Il modello qui si comporta **parametrico** (cancellare gli 8 combine ripristina
+  le astine a z pieno). Soluzione pulita: ri-tagliare con il tool **consumato sull'ULTIMO** combine
+  (`isKeepToolBodies=False` solo sull'8°) → nessun tool residuo. Importante per export: un tool
+  fantasma finisce in `final.stl/step`.
 - **Camera/render confermati:** la convenzione `VIEW_CAMERA` funziona; `cam.isFitView=True` +
   riassegnazione `vp.camera = cam` + `vp.refresh()` prima di `saveAsImageFile` dà render
   deterministici allineati ai `refs/`. (Tolto il dubbio "[da confermare]" sulla riassegnazione.)
