@@ -6,11 +6,11 @@ run**. Questo file è **versionato** (vive in `run/`, non nell'auto-memory fuori
 **scrivibile dal contesto RUN** (non è sotto `run/.claude/skills/`, che è read-only): quando
 durante una run emerge un nuovo problema/soluzione, **aggiungilo qui** e committa.
 
-> ⚠️ **Seed iniziale, NON ancora validato su Fusion reale.** Il progetto è stato scritto e rivisto
-> su Linux, dove Fusion non gira. Le voci sotto sono principi noti dell'API/del paradigma Fusion e
-> i vincoli del server MCP — vanno **confermati ed estesi sul Mac** alla prima run (vedi
-> `run/.claude/skills/fusion-build/SETUP_MACOS.md`). Marca come `[da confermare]` ciò che non hai
-> ancora verificato in prima persona; togli il marcatore quando l'hai visto funzionare.
+> ⚠️ **Seed iniziale + prima validazione reale (2026-05-31).** Il progetto è stato scritto su
+> Linux (dove Fusion non gira); la **prima run end-to-end sul Mac** è avvenuta il 2026-05-31 — vedi
+> la sezione **"✅ Validato su Fusion reale"** in fondo per i gotcha confermati/nuovi. Le voci
+> ancora marcate `[da confermare]` non sono state verificate in prima persona; togli il marcatore
+> quando le vedi funzionare. Setup: `run/.claude/skills/fusion-build/SETUP_MACOS.md`.
 
 Valgono per qualunque ricostruzione procedurale parametrica in Fusion guidata da MCP.
 
@@ -98,3 +98,48 @@ Valgono per qualunque ricostruzione procedurale parametrica in Fusion guidata da
 - Essendo **parametrico**, in re-iterazione spesso basta **modificare le quote** di
   sketch/feature esistenti invece di ricostruire da zero (riparti da `seed.f3d`).
 - Salva snapshot `.f3d` a ogni step (storico) e, per le metriche, esporta STL e ri-verificalo.
+
+## ✅ Validato su Fusion reale — run 2026-05-31 (porta-lattina / can caddy)
+Prima run end-to-end confermata sul Mac (Fusion 2702.1.58, tool MCP reale
+`mcp__fusion__fusion_mcp_execute`, NON `mcp__fusion__execute_fusion_code` come nel testo skill —
+il render si fa con `app.activeViewport.saveAsImageFile`). 6 step, tutti i body creati, gate
+overall=60 (reiterate). Gotcha **confermati e nuovi**:
+
+- **⚠️ Il doc nuovo "Senza titolo" parte spesso in DIRECT MODELING mode** (timeline vuota,
+  si comporta come "Part"/storia disattivata). Conseguenze viste in prima persona:
+  - `root.occurrences.addNewComponent(...)` **NON supportato** → costruisci i body nel
+    **root component** e **rinominali** (`body.name = 'Sleeve'`). Tutte le parti restano coassiali
+    all'origine (intento relativo preservato lo stesso, niente matrici mondo).
+  - `extrudeFeatures` con `CutFeatureOperation` **non trova il body target** in direct mode →
+    workaround: estrudi come **`NewBodyFeatureOperation`** poi **`CombineFeatures` con
+    `CutFeatureOperation`** (tool come strumento di taglio).
+  - `CircularPatternFeature` **di feature** fallisce (`PATTERN_FEATURES_NO_PASTE_INT_EDGES`) →
+    fai il **pattern di BODIES** (inputEntities = ObjectCollection di `bRepBodies`), asse =
+    `root.zConstructionAxis`. Idem per i rod: pattern del body 'Rod' ×8 a 360°.
+  - **FIX consigliato al preflight (§0):** su doc fresco imposta
+    `des.designType = adsk.fusion.DesignTypes.ParametricDesignType` **prima** di modellare, così
+    timeline/parametrico, `addNewComponent`, extrude-cut e pattern di feature funzionano in modo
+    normale. (Da provare alla prossima run; in questa abbiamo lavorato in direct mode coi
+    workaround sopra e ha retto.)
+- **Sketch sul piano XZ: `sketchY = −worldZ`.** Per posizionare un profilo a quota world Z=12.3
+  cm, il centro nello sketch va a `sketchY = −12.3`. Verifica sempre con la bbox del risultato.
+- **Traforo (honeycomb) su parete cilindrica:** piano di costruzione **tangente** (offset del
+  piano XZ a `y = raggio_esterno`), sketch dell'esagono lì, **extrude-cut a profondità FINITA**
+  (~0.4–0.5 cm verso −Y) così tagli solo la parete vicina e **non** quella opposta; poi
+  rectangular pattern verticale + **circular pattern di body** attorno a Z. Tieni i conteggi
+  moderati (~13 colonne × 3 file) per il budget ~30s; converge meglio spezzando cut e pattern in
+  chiamate separate con snapshot.
+- **Camera/render confermati:** la convenzione `VIEW_CAMERA` funziona; `cam.isFitView=True` +
+  riassegnazione `vp.camera = cam` + `vp.refresh()` prima di `saveAsImageFile` dà render
+  deterministici allineati ai `refs/`. (Tolto il dubbio "[da confermare]" sulla riassegnazione.)
+- **Export confermati:** `createFusionArchiveExportOptions(path)` (.f3d),
+  `createSTEPExportOptions(path, root)` (.step), `createSTLExportOptions(root, path)` con
+  `meshRefinement=MeshRefinementMedium` (.stl). Tutti via `des.exportManager.execute(opts)`.
+- **Watertight in assieme di body disgiunti:** il modello è un insieme di **solidi separati**
+  (Base, Sleeve, 8×Rod, TopRing, Strap), ognuno `isSolid=True` ma **non fusi** tra loro. Per
+  "watertight" ha senso il check per-body (B-rep solido), non un singolo STL unito; se serve un
+  unico guscio stampabile, valuta un Combine-Join finale (non fatto qui).
+- **Gap di fedeltà tipici visti dal gate** (utili come checklist di rifinitura): anello superiore
+  a sezione troppo grossa (usa tubo Ø~3–4 mm o band rettangolare), sleeve troppo alta (i rod
+  devono sporgere ~15–20% sopra), cinghietta da fare a **D piatta** (sweep di arco a sezione
+  rettangolare) non o-ring tondo, fascia bassa solida troppo sottile, base poco rastremata.
