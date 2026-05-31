@@ -143,3 +143,21 @@ overall=60 (reiterate). Gotcha **confermati e nuovi**:
   a sezione troppo grossa (usa tubo Ø~3–4 mm o band rettangolare), sleeve troppo alta (i rod
   devono sporgere ~15–20% sopra), cinghietta da fare a **D piatta** (sweep di arco a sezione
   rettangolare) non o-ring tondo, fascia bassa solida troppo sottile, base poco rastremata.
+
+## ⚠️ Dinamiche di re-iterazione e limiti del giudice (run 2026-05-31, iter2)
+- **Il punteggio puo CALARE in re-iterazione** se si *overcorregge* un gap. Iter1: sleeve "troppo
+  alta" → in iter2 abbassata a z7.8 → iter2: sleeve "troppo corta" (over-shoot opposto), overall
+  60→54. Lezione: correggi i gap in modo **incrementale e misurato** (qui bastava ~−5 mm, non
+  −12 mm); cambia **una variabile per volta** e riconfronta col ref PRIMA di spingere oltre.
+- **Il giudice (Sonnet visivo) e rumoroso/inconsistente tra iterazioni** su quote relative
+  (altezza sleeve, sporgenza rods): puo invertire la raccomandazione. Non trattare il suo numero
+  come ground-truth fine; ancora le quote alle **proporzioni misurate sul ref**, non solo al
+  commento del giudice.
+- **Il render grigio flat-shaded nasconde le sezioni piatte:** una cinghietta resa come anello
+  *piatto* (extrude 2 mm) viene letta come **o-ring tondo** dal giudice in grigio uniforme — gap
+  "forma strap" segnalato aperto anche con geometria corretta. Mitigazione: render del gate in
+  **shaded-with-edges** (spigoli visibili) cosi spessori e facce piatte si distinguono; valuta
+  una posa 3/4 piu radente sulla feature in esame.
+- **Allineamento rods↔ring:** se i rod arrivano a z_top e il ring e centrato piu in basso, i rod
+  *superano* il ring (letto come errore di relazione `on_top_of`). Fai terminare i rod **alla
+  quota del ring** (o alza il ring), non oltre.
