@@ -275,3 +275,39 @@ overall=60 (reiterate). Gotcha **confermati e nuovi**:
   — l'export (`.f3d/.step/.stl`) è un side-effect immediato che cattura i nomi correnti e non viene
   annullato. Verificato: rename in una chiamata → in una chiamata successiva i nomi sono di nuovo
   `Corpo1`/`Cover`.
+
+## 🔁 Run da immagini — porta-lattina iter1 via tool granulari (2026-06-01, gate 72)
+> Seconda costruzione dello stesso oggetto (refs della run 2026-05-31), ma orchestrata coi **tool
+> granulari** `mcp__fusion__*` invece che con adsk grezzo. 6 step tutti `done`, gate 72 (reiterate).
+> Conferme e nuovi gotcha specifici dei tool granulari:
+
+- **`designType = ParametricDesignType` dà la timeline MA il documento resta `DesignProductType`
+  (Part).** Quindi `create_component` fallisce comunque ("i documenti parte contengono un solo
+  componente"): tutti i body vivono nel **rootComponent**, coassiali all'origine (intento relativo
+  preservato lo stesso). Coerente con la lezione working-spring. Il preflight parametrico serve solo
+  a far funzionare timeline/extrude-cut/feature; non abilita gli assiemi.
+- **`circular_pattern` granulare di BODY funziona** (asse "z", count, total_angle): ottime le 8
+  astine da una sola. ⚠️ Richiede `body_name`: poiché il rename non persiste tra chiamate, NON
+  passare un nome "atteso" — leggi il nome REALE (`get_scene_info`/`list_components`) subito prima.
+- **`create_torus` IGNORA `center_x/y/z`** (crea sempre all'origine, è non-parametrico via
+  TemporaryBRepManager) → riposiziona con `move_body` dopo (per un dettaglio singolo è il fallback
+  ammesso e documentato: anello superiore z=12.9, cappio cuoio a (5.3,0,1.8)).
+- **`scale_body` granulare non-uniforme fallisce** ("troppi argomenti") → per appiattire una sezione
+  usa `execute_code` `ScaleFeatures.createInput(coll, originConstructionPoint, ValueInput) ` +
+  `setToNonUniform(x,y,z)` (cappio cuoio: Y×0.35 → nastro piatto).
+- **`extrude` di una regione anulare**: due cerchi concentrici nello stesso sketch → scegli il
+  `profile_index` della **corona** (qui 0), non il disco pieno interno (dà un cilindro pieno).
+- **`add_dimension` ridondanti rompono il loop del profilo** (profili→0) se la geometria è già
+  definita da `draw_circle radius=...`/`draw_line`: per profili semplici NON aggiungere quote, basta
+  il parametro del draw. (Visto allo step base e confermato altrove.)
+- **Honeycomb coi tool granulari = impossibile** (manca il pattern di FEATURE di taglio) → resta
+  `execute_code`: piano tangente XZ offset y=R_est, `sketchY=-worldZ`, hex flat-to-flat ~1.0cm,
+  extrude-cut -Y 0.5cm sulla parete vicina, circular_pattern 13 + 3 file a mattoncino (UN solo set).
+  Reticolo connesso ok. **Gap di fedeltà confermato vs ref: servono celle PIÙ GRANDI e MENO file**
+  (ref ~2 file di esagoni lato ~8-10mm); 13×3 celle piccole leggono come rombi/ovali fitti.
+- **Giudice su render grigio flat = falsi negativi sulle sezioni curve.** Ha letto astine
+  cilindriche come "a sezione rettangolare" e base circolare di rivoluzione come "vassoio
+  rettangolare" → overall 60 ingiusto. Le metriche oggettive (proporzioni ~1%, COM 0.15mm
+  dall'asse, watertight per-corpo) e il check 3/4 diretto smentiscono: overall corretto a 72.
+  Ribadisce: **render shaded-with-edges** per il gate e **ancorare l'overall alle metriche**, non al
+  solo numero del giudice.
