@@ -214,3 +214,32 @@ overall=60 (reiterate). Gotcha **confermati e nuovi**:
   intero design: `exportManager.createSTEPExportOptions(path, root)` /
   `createSTLExportOptions(root, path)` (i metodi sono `*ExportOptions`, non `*ExportInput`).
   _Validato_: step 1 (done) — coil conica, bbox 12×12×12 mm a target.
+
+## 📚 Pattern da tutorial — snap-fit-enclosure (2026-06-01, gate 82)
+> Distillazione da `fusion-build-from-transcript` sul tutorial "easy snap fit enclosures" (case + top
+> cover parametrici, 8/8 step done). Dei 9 candidate_lessons, scartati come **duplicati** già qui:
+> mirror-feature, sketch fully-constrained, shell→pareti sottili; e `verify-clearance-with-section`
+> (mai applicato nel build). I 5 pattern di **metodo** nuovi e validati:
+
+- **Definisci gli user parameters all'inizio e guida le quote con espressioni** (width/length/height/
+  shell/gap), non numeri sparsi. Ri-dimensioni l'intero modello cambiando un valore; le relazioni
+  (es. altezza nub = `shell*2`, larghezza = `width/2`) restano coerenti. _Validato_: step 1 (done);
+  fonte: "create some parameters to make it easier for us to adjust this design".
+- **Per gli accoppiamenti con tolleranza usa un offset guidato da `shell+gap`.** Esprimere la
+  clearance come somma parametrica (qui 1.5+0.2 = 1.7 mm) rende il fit di stampa esplicito e
+  regolabile da un solo parametro. _Validato_: step 7 (done, lip offset interno); fonte: "driven with
+  this shell and i want to add gap to that shell and that'll make it 1.7".
+- **Usa un taper di -45° nelle estrusioni di feature sporgenti/incavi per renderle stampabili senza
+  supporti.** Le FDM gestiscono bene gli overhang a 45°. Nota backend: il tool granulare `extrude`
+  non ha taper → si fa via `execute_code` (`setOneSideExtent(..., taperAngle)`). _Validato_: step 4
+  (nub) e step 8 (cutout), done; fonte: "negative 45 degree because 3d printers can print 45 degree
+  features".
+- **Guida la geometria di una parte da quella di un'altra: riusa facce, profili e sketch tra le
+  parti invece di ridisegnarli.** Cover, lip e cutout derivano dai profili/facce del case e dallo
+  sketch del nub → restano coerenti e si aggiornano da soli, con meno sketch. _Validato_: step 7
+  (lip dal perimetro del cover), done; fonte: "leverage all the kind of sketches ... from other
+  components ... you don't need to make a whole bunch of sketches".
+- **Ancora l'inizio di un'estrusione a geometria reale con lo start 'from object'** (da una faccia
+  esistente) invece che al piano dello sketch, quando l'inizio deve seguire una superficie. _Validato_:
+  step 8 (cutout dal piano del lip), done; fonte: "change the start ... to from object ... start from
+  this surface".
