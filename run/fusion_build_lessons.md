@@ -260,3 +260,18 @@ overall=60 (reiterate). Gotcha **confermati e nuovi**:
 - **API utile:** `offsetFacesFeatures.createInput(<lista di BRepFace>, ValueInput.createByReal(d))`
   (lista Python di facce, NON ObjectCollection; niente arg isChain) per ingrandire un corpo di una
   luce uniforme → utile a ricavare un accoppiamento con clearance come complemento booleano.
+
+## 🏷️ Naming di corpi e schizzi (regola, 2026-06-01)
+> Indicazione utente: il naming è importante. Vale per ogni run.
+
+- **Dai sempre nomi parlanti** a body, sketch, piani di costruzione e feature — niente `Corpo1`/
+  `Schizzo1`/`Estrusione1` di default. Convenzione: `<Parte>` per il body, `<Parte><Ruolo>Sketch`/
+  `Plane` per sketch e piani (es. `Case`, `TopCover`, `CaseBaseSketch`, `NubLeftProfileSketch`,
+  `CoverCapPlane`). Migliora leggibilità del timeline e **robustezza dei riferimenti** (selezione per
+  nome > indici volatili che cambiano alla rigenerazione).
+- **🛑 Gotcha (server MCP):** gli edit di `body.name` / `sketch.name` / `.isVisible` **NON persistono
+  tra chiamate `execute_code` separate** (un recompute del server li resetta ai default). Le feature
+  di geometria invece persistono. Quindi: **rinomina ed esporta nella STESSA chiamata** `execute_code`
+  — l'export (`.f3d/.step/.stl`) è un side-effect immediato che cattura i nomi correnti e non viene
+  annullato. Verificato: rename in una chiamata → in una chiamata successiva i nomi sono di nuovo
+  `Corpo1`/`Cover`.
