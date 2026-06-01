@@ -276,7 +276,9 @@ Per ogni step in ordine:
 | `symmetric_to`              | **`mirror`** (feature) sul piano di simmetria — non un joint            |
 
 **VIETATO** `move_body`/trasformazioni assolute per "piazzare" una parte. Firme dei riferimenti dei
-tool granulari *[da confermare sul Mac]*: in caso d'errore leggi il messaggio del tool e correggi.
+tool granulari *[da confermare sul Mac]*: in caso d'errore leggi il messaggio del tool e correggi;
+per l'API `adsk` sottostante (es. `Joints add`/`JointInput`) usa il lookup della doc locale
+(§"Documentazione API locale").
 
 ### Render di verifica (pose canoniche, via execute_code)
 
@@ -284,7 +286,8 @@ Unico uso ammesso di `execute_code`: dentro una chiamata, per ogni vista utile i
 `app.activeViewport.camera` con le pose canoniche `VIEW_CAMERA` di `src/fusion_build.py`
 (front=+Y, side=−X, back=−Y, three_quarter=iso; up=+Z), `viewport.fit()`, poi
 `saveAsImageFile(<png>, w, h)`. Apri il PNG con Read e giudica forma/simmetria rispetto ad
-`acceptance` e `expected_summary`.
+`acceptance` e `expected_summary`. Per le firme `adsk` del render (`Camera.eye`/`target`/
+`upVector`, `Viewport.saveAsImageFile`) fai lookup nella doc locale se incerto.
 
 ### Template prompt per l'executor (Sonnet)
 
@@ -293,7 +296,9 @@ Unico uso ammesso di `execute_code`: dentro una chiamata, per ogni vista utile i
 > Usi `mcp__fusion__execute_code` **SOLO** per il render di verifica (camera + `saveAsImageFile`).
 > **Esattezza per costruzione**: sketch vincolati e quotati → extrude/revolve, feature native, MAI mesh.
 > Le firme dei tool non sono documentate: fidati dello schema esposto e, in caso d'errore, leggi il
-> messaggio del tool e correggi. Focus su **geometria e simmetria**; materiali/colori secondari.
+> messaggio del tool e correggi; per l'API `adsk` sottostante e per il Python di `execute_code` fai
+> lookup nella doc locale (`fusion-docs/search.py`, vedi §"Documentazione API locale"). Focus su
+> **geometria e simmetria**; materiali/colori secondari.
 >
 > PIANO COMPLETO (contesto): {plan.json}
 > STEP DA APPLICARE: {step}
@@ -303,6 +308,10 @@ Unico uso ammesso di `execute_code`: dentro una chiamata, per ogni vista utile i
 >
 > VINCOLI HARD: unità **cm** (1 mm = 0.1 cm); **una operazione per chiamata** (batch crasha); ~30s a
 > chiamata (spezza, snapshot); annullare = `undo` o riapri `.f3d`; `execute_code` solo per render.
+> **Doc API locale — non indovinare se puoi verificare**: prima di scrivere `adsk.*` in
+> `execute_code`, o se un tool granulare erra per firma sconosciuta, fai lookup lessicale
+> `uv run python fusion-docs/search.py "<keyword adsk>" -k 5` → `Read` del md (cerca per
+> identificatore, es. `saveAsImageFile`/`boundingBox`/`Joints add`, non per nome del tool).
 >
 > Procedura (sequenza granulare, una chiamata per volta):
 > 1. Stato con `get_scene_info`; se serve, `set_design_type` → parametrico.
@@ -342,7 +351,8 @@ Confronta l'output con ciò che il tutorial avrebbe prodotto, in modo **misurabi
 2. **Metriche oggettive** (via `execute_code`): bbox `body.boundingBox` (cm) → ×10 = mm; se il
    manifest implica una bbox attesa dalle quote del video usala come `target_mm` (sanity →
    `proportion_error_pct`); `symmetry_dev_mm` per asse (specchiatura); `watertight` via `export_stl` +
-   trimesh (e `body.isSolid`).
+   trimesh (e `body.isSolid`). Per le firme `adsk` (`BRepBody.boundingBox`, `BoundingBox3D`,
+   `BRepBody.isSolid`) fai lookup nella doc locale se incerto.
 3. **Render 4 viste** dell'output (pose `VIEW_CAMERA`, via `execute_code`), salvate nei `views[...]`.
 4. **Giudizio semantico** — lancia **un** subagent giudice (Sonnet) col template sotto: NON ci sono
    immagini di riferimento; il giudice confronta i 4 render con `expected_summary` + `manifest` →
@@ -402,7 +412,45 @@ uv run python -m src.fusion_build reinit-from-result <prev_build_dir>
 `expected_summary` invariato), `planning_hints` = `actionable_gaps`. (`refs/` semplicemente assenti.)
 Esegui poi piano (di rifinitura, mirato ai gap) → esecuzione → gate. Salti pre-elaborazione e parsing
 (action-log e manifest già pronti); lo step 1 NON crea geometria ma apre `<seed.f3d>` (via
-`execute_code` `app.documents.open` *[da verificare sul Mac]*).
+`execute_code` `app.documents.open` *[da verificare sul Mac]*; per la firma esatta:
+`fusion-docs/search.py "documents open"` → `Documents.open`).
+
+## Documentazione API locale — lookup lessicale (usalo PRIMA di indovinare l'API)
+
+C'è una **knowledge base offline dell'API Fusion** in `run/fusion-docs/` (markdown + indice
+lessicale SQLite FTS5/BM25, estratta dal CHM ufficiale). Serve a scrivere il Python `adsk.*`
+**giusto al primo colpo** invece di tirare a indovinare. **Consultala** in due casi:
+- **prima** di scrivere `adsk.*` dentro `mcp__fusion__execute_code` (camera/`saveAsImageFile`,
+  `boundingBox`, `isSolid`, `app.documents.open`, proprietà fisiche…);
+- **quando un tool granulare erra per firma sconosciuta** → cerca l'API `adsk.*` sottostante per
+  capire parametri/tipi (è un punto del self-heal del retry-loop).
+
+Comando (dalla cwd RUN = `run/`), poi `Read` del path md **assoluto** stampato:
+```
+uv run python fusion-docs/search.py "<identificatore o keyword>" -k 5
+```
+È **lessicale**: cerca per **identificatore/nome** di classe o membro (o poche keyword), NON per
+frase concettuale lunga e **NON per il nome snake_case del tool MCP**. Per trovare l'API dietro a
+un tool granulare, cerca il **concetto `adsk`**, non il nome del tool:
+
+| serve…                         | query efficace            | pagina top |
+|--------------------------------|---------------------------|------------|
+| render vista                   | `saveAsImageFile`         | `Viewport.saveAsImageFile` |
+| posa camera                    | `Camera eye`              | `Camera.eye` / `CameraTypes` |
+| bbox per il gate               | `boundingBox`             | `BRepBody.boundingBox` |
+| watertight / solido            | `isSolid`                 | `BRepBody.isSolid` |
+| aprire il seed in re-iterazione| `documents open`          | `Documents.open` |
+| joint (tool `add_joint`)       | `Joints add`              | `Joints.add` / `JointInput` |
+| sketch (tool `create_sketch`)  | `Sketches add`            | `Sketches.add` |
+
+Resta **grounding**, non oracolo: per i tool granulari la firma autorevole è lo **schema esposto
+dal server** + il messaggio d'errore; la doc spiega l'API `adsk` che quei tool incapsulano e
+quella che usi in `execute_code`.
+
+> **Precondizione (una tantum, sul Mac):** la doc è un artefatto **gitignored**. Se `search.py`
+> dà `no matches` o manca `fusion-docs/docs.db`, costruiscila una volta:
+> `bash fusion-docs/extract_chm.sh && uv run python fusion-docs/parse_html.py && uv run python fusion-docs/build_index.py`
+> (dettagli in `fusion-docs/README.md`). `Bash(uv run *)` è già pre-concesso in RUN: nessun prompt.
 
 ## Toolbox parametrico Fusion (preferenze — privilegiare l'esatto per costruzione)
 
@@ -416,6 +464,8 @@ Esegui poi piano (di rifinitura, mirato ai gap) → esecuzione → gate. Salti p
 - **Parametri** → `get_parameters`, `create_parameter`, `set_parameter`.
 - **Export** → `export_f3d`, `export_step`, `export_stl`.
 - **VIETATO**: mesh/per-vertice; `move_body`/trasformazioni assolute per posizionare; boolean "sporchi".
+- **Firma o parametri incerti** (tool granulare o API `adsk` in `execute_code`)? → **lookup lessicale**
+  della doc locale (§"Documentazione API locale"): `uv run python fusion-docs/search.py "<keyword>"`.
 
 ## Gotcha / principi
 
@@ -427,6 +477,9 @@ Esegui poi piano (di rifinitura, mirato ai gap) → esecuzione → gate. Salti p
 - **Una operazione per chiamata, ~30s**: spezza, snapshot `.f3d`; annulla con `undo` o riapri `.f3d`.
 - **Porta 9876 condivisa con blender-mcp**: non tenere i due add-in attivi insieme.
 - **Render/bbox solo via `execute_code`**; tutta la geometria via tool granulari.
+- **Doc API locale**: per il Python `adsk.*` di `execute_code` e per capire l'API dietro ai tool
+  (firme MCP non documentate) usa il **lookup lessicale** `fusion-docs/search.py` (cerca per
+  identificatore `adsk`, non per nome snake_case del tool) — vedi §"Documentazione API locale".
 - **Knowledge base**: gotcha Fusion confermati in `run/fusion_build_lessons.md` (condiviso con
   fusion-build) — aggiungi lì i nuovi e committa.
 
