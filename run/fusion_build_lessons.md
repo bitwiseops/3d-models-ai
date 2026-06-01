@@ -243,3 +243,20 @@ overall=60 (reiterate). Gotcha **confermati e nuovi**:
   esistente) invece che al piano dello sketch, quando l'inizio deve seguire una superficie. _Validato_:
   step 8 (cutout dal piano del lip), done; fonte: "change the start ... to from object ... start from
   this surface".
+
+## 🔎 Gate: fit-check di sezione + compenetrazione (regola, 2026-06-01)
+> Indicazione utente, da applicare SEMPRE negli assiemi multi-parte. Un render esterno può
+> sembrare perfetto mentre internamente le parti interferiscono.
+
+- **Caso che l'ha motivata:** enclosure snap-fit — gate esterno 82/100 ma coperchio e case erano in
+  **compenetrazione solida** (nessuna luce), quindi il lock non poteva funzionare. Visibile solo con
+  sezione + check di interferenza.
+- **Aggiungi al gate (§6), oltre a bbox/simmetria/watertight:**
+  - **Interferenza per coppia di corpi**: `tbm=TemporaryBRepManager.get(); c=tbm.copy(a); tbm.booleanOperation(c, tbm.copy(b), IntersectionBooleanType)` → `c.volume` deve essere ~0. In alternativa, **mappa di occupazione** per punti sul piano di accoppiamento (`body.pointContainment` su una griglia (x,z) a y=0): 0 celle in comune. Qualsiasi overlap = **difetto HARD**, a prescindere dal punteggio visivo.
+  - **Render di sezione** attraverso le feature di mating: taglio temporaneo della metà anteriore (box + `combineFeatures` CutFeatureOperation su entrambi i corpi), camera front ortho, visual style **shaded-with-edges** per leggere i canali di luce; poi **ripristina** cancellando le feature temporanee.
+- **Gotcha:** il tool `mcp__fusion__create_section_analysis` è bacato (`root.analyses` inesistente):
+  fai la sezione via `execute_code`. E **cancella la section analysis residua** da `design.analyses`
+  a fine controllo, altrimenti taglia (hatch) tutti i render successivi del viewport.
+- **API utile:** `offsetFacesFeatures.createInput(<lista di BRepFace>, ValueInput.createByReal(d))`
+  (lista Python di facce, NON ObjectCollection; niente arg isChain) per ingrandire un corpo di una
+  luce uniforme → utile a ricavare un accoppiamento con clearance come complemento booleano.
