@@ -40,6 +40,9 @@ Ti fermi solo per (sicurezza / dati):
 - **Preflight fallito** (Fusion non connesso) quando stai per eseguire (§4) → fermati e istruisci.
 - **Documento con lavoro esistente dell'utente** da cancellare → chiedi conferma. Documento
   vuoto/nuovo → procedi.
+- **Salvataggio lezioni** (§6.1): al gate proponi i pattern validati e chiedi conferma prima di
+  scrivere in `fusion_build_lessons.md` (file versionato, condiviso con fusion-build). È l'unico
+  altro punto di conferma, e cade comunque al gate dove la pipeline si ferma già.
 
 ## Vincoli HARD di Fusion (valgono per OGNI chiamata MCP — non violarli)
 
@@ -62,6 +65,11 @@ Ti fermi solo per (sicurezza / dati):
 Il transcript grezzo (auto-caption) è rumoroso: niente punteggiatura, errori ASR sui termini CAD
 ("fill it" → *fillet*, "loft" → *loafed*), filler, timestamp. Trasformalo in un **action-log
 strutturato** PRIMA di pianificare, con un **fold sequenziale incrementale**.
+
+> La **narrazione didattica/best-practice** del tutore ("conviene lavorare in parametrico", "vincola
+> sempre lo sketch", "usa i joint, non spostare i corpi") è *meta-conoscenza*, NON un'azione: **non
+> forzarla nell'action-log** (che resta operazioni concrete con quote). Viene raccolta al §2 come
+> `candidate_lessons` e, se si rivela utile nel build, proposta per `fusion_build_lessons.md` (§6).
 
 1. Bootstrap della build session dal file di transcript:
    ```
@@ -140,7 +148,10 @@ Schema `action_log.json` (azioni atomiche ordinate, quote **esatte in mm**):
 
 Dall'action-log estrai l'**inventario di COSA deve esistere** e la **descrizione attesa dell'oggetto
 finale**. Il manifest è la **single source of truth** per il planner e per il `parts_check` del gate;
-`expected_summary` è il riferimento del **giudizio semantico** (sostituisce le 4 immagini).
+`expected_summary` è il riferimento del **giudizio semantico** (sostituisce le 4 immagini). In più,
+estrai i **candidate_lessons**: i **pattern di buon uso generalizzabili** che il tutorial *insegna*
+(non i fatti specifici dell'oggetto) — saranno validati e, se utili, salvati in
+`fusion_build_lessons.md` (§6).
 
 1. Lancia **un** subagent **parser** con il tool **Agent** (`subagent_type: general-purpose`,
    `model: opus`; `Read` su `transcript/action_log.json` e, se serve disambiguare, su
@@ -168,18 +179,34 @@ l'executor lo mappa al modo di costruzione Fusion: cilindro/cono/sfera/toro → 
     }
   ],
   "expected_summary": "Descrizione dell'oggetto finale: forma, parti, proporzioni, feature salienti — così come risulterebbe seguendo il tutorial. È il riferimento del giudice semantico.",
+  "candidate_lessons": [
+    {
+      "id": "L1",
+      "pattern": "Preferisci il parametrico al direct modeling",
+      "rationale": "In parametrico timeline/feature/joint/pattern funzionano in modo normale; in direct mode molte operazioni vanno aggirate",
+      "scope": "fusion-backend|general",
+      "applies_to_actions": [2, 4],
+      "source": {"quote": "always start in parametric mode", "kind": "narration|demonstrated"},
+      "confidence": "high|medium|low"
+    }
+  ],
   "open_questions": ["..."]
 }
 ```
+`candidate_lessons` è **opzionale** (`[]` se il tutorial non insegna pattern generalizzabili);
+`save-manifest` lo persiste as-is. NON metterci fatti specifici dell'oggetto (quelli stanno in
+`parts`/`expected_summary`): solo pattern di **metodo** riusabili in qualunque build.
 
 ### Template prompt per il parser (Opus, NO MCP)
 
 > Sei un analista CAD. A partire dall'**action-log** estratto dal transcript di un tutorial Fusion 360
-> (e, se serve, dal transcript originale), produci: (a) l'**inventario delle parti** che il tutorial
-> costruisce, (b) una **descrizione testuale dell'oggetto finale atteso**.
+> (e dal transcript originale), produci: (a) l'**inventario delle parti** che il tutorial costruisce,
+> (b) una **descrizione testuale dell'oggetto finale atteso**, (c) i **candidate_lessons**: i pattern
+> di buon uso generalizzabili che il tutorial insegna.
 >
 > ACTION-LOG (apri con Read): {transcript/action_log.json}
-> TRANSCRIPT ORIGINALE (link, apri SOLO se devi disambiguare): {transcript/source.txt}
+> TRANSCRIPT ORIGINALE (apri con Read: per disambiguare le parti E per cogliere i pattern insegnati
+>   nella narrazione): {transcript/source.txt}
 >
 > Procedura:
 > 1. Raggruppa le azioni in **parti** (body/component) coerenti: ogni parte = un `id` parlante,
@@ -188,11 +215,19 @@ l'executor lo mappa al modo di costruzione Fusion: cilindro/cono/sfera/toro → 
 >    azioni che la realizzano), `confidence`.
 > 2. Scrivi `expected_summary`: cosa dovrebbe risultare alla fine (forma, parti, proporzioni, feature).
 >    È il metro del giudice: sii concreto e geometrico, non vago.
-> 3. Ciò che resta ambiguo → `open_questions`.
+> 3. Estrai i **candidate_lessons**: SOLO pattern di **metodo generalizzabili** — riusabili in
+>    qualunque build Fusion — che il tutore *insegna* o *dimostra* (es. "lavora in parametrico", "vincola
+>    a fondo lo sketch prima di estrudere", "posiziona con i joint, non spostando i corpi", "revolve per
+>    i solidi di rivoluzione", "modella metà e specchia"). Per ognuno: `pattern` (1 frase imperativa),
+>    `rationale` (il *perché* detto/implicito), `scope` (`fusion-backend` o `general`),
+>    `applies_to_actions` (gli `n` delle azioni dove si applica), `source` (`quote` breve + `kind`
+>    narration/demonstrated), `confidence`. **ESCLUDI** i fatti specifici dell'oggetto (quote, nomi
+>    parti, scelte estetiche del progetto): quelli NON sono lezioni. Se non ce ne sono, `[]`.
+> 4. Ciò che resta ambiguo → `open_questions`.
 >
 > RITORNA come testo finale = valore SOLO il JSON del manifest (schema:
-> `{"parts":[...], "expected_summary":"...", "open_questions":[...]}`). Scrivilo anche nel file
-> manifest indicato. Niente altro testo.
+> `{"parts":[...], "expected_summary":"...", "candidate_lessons":[...], "open_questions":[...]}`).
+> Scrivilo anche nel file manifest indicato. Niente altro testo.
 
 ## 3. PIANO (planner = Opus, lo fai TU nel main loop, thinking MEDIO, NO MCP)
 
@@ -260,7 +295,8 @@ Per ogni step in ordine:
 2. Lancia **un** subagent executor (`subagent_type: general-purpose`, `model: sonnet`; ha i tool
    `mcp__fusion__*` granulari **+** `mcp__fusion__execute_code` *(solo render/bbox)* + Write).
    Template sotto, con piano completo, step corrente, **le parti del manifest** citate in
-   `step.manifest_parts`, `expected_summary`, e i path artefatti.
+   `step.manifest_parts`, `expected_summary`, i **candidate_lessons pertinenti** (quelli il cui
+   `applies_to_actions` interseca `step.source_actions`), e i path artefatti.
 3. Registra il record: `uv run python -m src.fusion_build record <build_dir> <record.json>`.
 4. Step successivo. **Best-effort**: se uno step non converge in **3 tentativi**, salva il migliore,
    marca `status:"failed"` con note, prosegui.
@@ -304,6 +340,7 @@ Unico uso ammesso di `execute_code`: dentro una chiamata, per ogni vista utile i
 > STEP DA APPLICARE: {step}
 > PARTI DEL MANIFEST DA REALIZZARE: {parts di step.manifest_parts}
 > OGGETTO ATTESO (per il check visivo della forma): {manifest.expected_summary}
+> PATTERN SUGGERITI DAL TUTORIAL (candidate_lessons pertinenti): {candidate_lessons con applies_to_actions ∩ step.source_actions}
 > PATH ARTEFATTI (assoluti): f3d={...} stl={...} png={...} json={...}
 >
 > VINCOLI HARD: unità **cm** (1 mm = 0.1 cm); **una operazione per chiamata** (batch crasha); ~30s a
@@ -330,8 +367,12 @@ Unico uso ammesso di `execute_code`: dentro una chiamata, per ogni vista utile i
 >    Scrivi `<json>` col record.
 > 8. RITORNA (testo finale = valore) SOLO il JSON record:
 >    `{"id","title","status":"done|failed","attempts":N,"f3d":"steps/step_NN.f3d",
->      "stl":"steps/step_NN.stl","png":"steps/step_NN.png","components":[...],"joints":[...],"notes":"..."}`
->    (path RELATIVI alla build dir).
+>      "stl":"steps/step_NN.stl","png":"steps/step_NN.png","components":[...],"joints":[...],
+>      "applied_lessons":["L1", ...],"notes":"..."}`
+>    (path RELATIVI alla build dir). In **`applied_lessons`** elenca gli `id` dei PATTERN SUGGERITI
+>    che hai **effettivamente seguito** in questo step (lista vuota se nessuno); se un pattern ha
+>    aiutato o NON ha funzionato, dillo in `notes`. Seguire i pattern non è obbligatorio: è
+>    tracciamento onesto di cosa hai usato, serve a validarli a fine pipeline.
 
 ## 5. Chiusura
 
@@ -365,6 +406,8 @@ Confronta l'output con ciò che il tutorial avrebbe prodotto, in modo **misurabi
    → raccomandazione deterministica (`ACCEPT_THRESHOLD=85`, `MAX_ITERATIONS=2`). Imposta `status=done`.
 6. **Riporta all'utente e FERMATI** (sempre): punteggi per-vista, metriche, copertura manifest,
    `actionable_gaps`, raccomandazione + motivazione. Se `reiterate`, di' che può rilanciare (§7).
+7. **Distillazione lezioni dal tutorial** (sotto, §6.1): includila nel report del gate e, su
+   conferma utente, salva i pattern validati in `fusion_build_lessons.md`.
 
 Schema `verdict.json`:
 ```json
@@ -402,7 +445,37 @@ Schema `verdict.json`:
 > dove `overall_score` è la sintesi pesata (penalizza forte proporzioni/simmetria errate e parti
 > mancanti). Niente altro testo.
 
-## 7. Re-iterazione (su richiesta utente — parte DAL risultato)
+### 6.1 Distillazione lezioni dal tutorial (al gate, scrittura SU CONFERMA)
+
+I tutorial insegnano pattern di buon uso del backend (es. "parametrico > direct", "vincola lo
+sketch", "joint non trasformazioni"). Salva nel knowledge base **solo quelli che si sono
+rivelati utili in QUESTO run** — non ogni affermazione del video. Lo fai TU (main loop) come
+ultimo passo del gate, prima di chiudere il report.
+
+1. **Raccogli**: `manifest.candidate_lessons`, tutti i record step (`applied_lessons`, `status`,
+   `notes`), il `verdict` (`overall_score`, `actionable_gaps`), e `fusion_build_lessons.md` (Read,
+   per il dedup).
+2. **Filtro evidence-based** — tieni un candidate-pattern SOLO se TUTTE:
+   - **generalizzabile** (`scope` general/fusion-backend; non un fatto specifico dell'oggetto);
+   - **applicato**: il suo `id` compare in `applied_lessons` di ≥1 step (o è chiaramente realizzato
+     da uno step `done` a cui mappa via `applies_to_actions`);
+   - quegli step sono **`status: done`**;
+   - **ha funzionato**: `overall_score` decente (≳ `ACCEPT_THRESHOLD` o comunque alto) **oppure** il
+     pattern ha chiuso un gap (non compare più tra gli `actionable_gaps`).
+   Scarta tutto il resto **con motivazione** (mai applicato / step failed / specifico dell'oggetto /
+   gate scarso / **già presente** nel file lezioni).
+   > Esempi: `"parametrico > direct"` applicato in step 2,4 (done) + gate 88 → **SALVA**;
+   > `"usa material X"` mai in `applied_lessons` → **SCARTA** (mai applicato);
+   > `"sketch fully-constrained"` ma già nel file lezioni → **SCARTA** (duplicato).
+3. **Proponi nel report del gate**: elenca i pattern superstiti con la **prova d'uso** (step + esito
+   + `overall_score`) e **chiedi all'utente** se salvarli (è l'unico punto di conferma nuovo).
+4. **Su conferma** (e solo allora): aggiungi in coda a `fusion_build_lessons.md` una **sottosezione
+   datata e tracciabile**, poi committa (come per le altre lezioni):
+   ```
+   ## 📚 Pattern da tutorial — <slug> (<YYYY-MM-DD>, gate <overall_score>)
+   - **<pattern>** — <rationale>. _Validato_: step <ids> (done); fonte: "<quote>".
+   ```
+   Su **no**: non scrivere nulla.
 
 Se l'utente chiede di rilanciare dopo `reiterate`:
 ```
@@ -481,7 +554,9 @@ quella che usi in `execute_code`.
   (firme MCP non documentate) usa il **lookup lessicale** `fusion-docs/search.py` (cerca per
   identificatore `adsk`, non per nome snake_case del tool) — vedi §"Documentazione API locale".
 - **Knowledge base**: gotcha Fusion confermati in `run/fusion_build_lessons.md` (condiviso con
-  fusion-build) — aggiungi lì i nuovi e committa.
+  fusion-build) — aggiungi lì i nuovi e committa. Inoltre, i run da transcript **propongono al
+  gate** (§6.1) i pattern di buon uso *insegnati dal tutorial e validati nel build* (applicati +
+  funzionanti), e li salvano lì **su conferma** dell'utente — non ogni affermazione del video.
 
 ## Note operative
 
