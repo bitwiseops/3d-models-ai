@@ -184,3 +184,33 @@ overall=60 (reiterate). Gotcha **confermati e nuovi**:
 - **Allineamento rods↔ring:** se i rod arrivano a z_top e il ring e centrato piu in basso, i rod
   *superano* il ring (letto come errore di relazione `on_top_of`). Fai terminare i rod **alla
   quota del ring** (o alza il ring), non oltre.
+
+## 📚 Pattern da tutorial — working-spring (2026-06-01, gate 77)
+> Distillazione da `fusion-build-from-transcript` sul tutorial "Model a WORKING Spring in Fusion 360".
+> I `candidate_lessons` del tutorial (split coil → revolute joint, components-before-joints,
+> motion-link, joint-limit+rest, as-built joint, ground) **NON sono stati salvati**: tutti pattern
+> di ASSEMBLY/MOTION, applicabili solo agli step 4–5 che sono **falliti** (filtro evidence-based:
+> mai applicati con successo). Sono però emersi 3 **gotcha di backend confermati** in questo run:
+
+- **Documento PART = un solo componente → niente joint/assiemi via MCP.** Il server apre un
+  documento di tipo `DesignProductType` (Part), che può contenere **solo il rootComponent**:
+  `occurrences.addNewComponent()` fallisce ("i documenti parte possono contenere un solo
+  componente"), e `Joints.add()` dà "Provided input paths for joint are not valid" perché le due
+  `JointGeometry` devono stare in **occorrenze diverse**. Quindi tutto lo strato assembly/motion
+  (revolute/slider/rigid joint, motion-link, joint-limit, rest, ground) **non è realizzabile**:
+  servirebbe un documento Assembly. `add_joint` granulare accetta solo `(component_one,
+  component_two, joint_type)` — nessuna geometria/asse/flag/limite. _Validato_: step 4 (failed) —
+  split riuscito (9 segmenti) ma joint impossibili; split annullato per preservare la geometria.
+  Fonte: "you can't apply joints to bodies these all need to be components".
+- **`extrude direction='negative'` esce SYMMETRIC (bug del tool granulare).** Produce
+  un'estrusione a due lati (es. 2 mm invece di 1 mm a un solo lato). Per un solo lato usare
+  `execute_code` con `setOneSideExtent(...)` + `ExtentDirections.NegativeExtentDirection` — oppure
+  sketchare già sul piano alla quota giusta ed estrudere `positive`. _Validato_: step 2 (done,
+  2 tentativi).
+- **Nessun tool `coil`; `CoilFeatures.add` non disponibile → fallback sweep.** La collection
+  `coilFeatures` espone solo `count/item/itemByName`. Fallback funzionante: **sweep** di un
+  cerchio-profilo lungo una spline 3D elicoidale per punti (`r(t)=r0+z·tan(taper)`, `z` 0→h,
+  `theta` 0→rev·2π) con piano profilo via `ConstructionPlaneInput.setByDistanceOnPath`. Export
+  intero design: `exportManager.createSTEPExportOptions(path, root)` /
+  `createSTLExportOptions(root, path)` (i metodi sono `*ExportOptions`, non `*ExportInput`).
+  _Validato_: step 1 (done) — coil conica, bbox 12×12×12 mm a target.
