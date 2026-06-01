@@ -1,0 +1,7 @@
+# Generated artifacts — all regenerable from the CHM via the scripts. The CHM is the
+# single source of truth and is not committed either.
+chm_html/
+md/
+docs.jsonl
+docs.db
+*.chm
