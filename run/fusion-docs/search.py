@@ -90,11 +90,12 @@ def main():
     for i, (obj, member, kind, snip, md_path, url, score) in enumerate(rows, 1):
         name = f"{obj}.{member}" if member else obj
         snip = " ".join(snip.split())
+        # Absolute paths so callers (incl. skill subagents from any cwd) can Read directly.
         print(f"{i:2d}. {name}  [{kind}]   (bm25 {score:.2f})")
         if snip:
             print(f"    {snip}")
-        print(f"    md:  {md_path}")
-        print(f"    src: {url}")
+        print(f"    md:  {os.path.join(HERE, md_path)}")
+        print(f"    src: {os.path.join(HERE, url)}")
         print()
 
 

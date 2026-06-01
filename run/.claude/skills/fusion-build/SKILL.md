@@ -39,7 +39,9 @@ Argomento della skill: il path della sessione Oggetti sorgente (es.
 > ⚠️ Le **firme dei parametri** dei tool granulari **non sono documentate** nel README di
 > faust-machines: alla prima chiamata di ogni tool nuovo fidati dello **schema esposto dal server**
 > e, in caso di errore, **leggi il messaggio del tool e correggi** (è uno dei punti di self-heal del
-> retry-loop). Le firme vanno introspezionate sul Mac (vedi `run/README.md`).
+> retry-loop). Le firme vanno introspezionate sul Mac (vedi `run/README.md`). L'**API `adsk.*`
+> sottostante** (che il tool incapsula, e che usi in `execute_code`) è però documentata localmente:
+> consultala col lookup lessicale (vedi §"Documentazione API locale") prima di indovinare.
 
 ## Auto mode (default all'invocazione)
 
@@ -307,7 +309,9 @@ front/right/back, isometrica fissa per three_quarter), `camera.isFitView = True`
 `viewport.fit()`), riassegna `viewport.camera = camera`, poi
 `viewport.saveAsImageFile(<png>, w, h)`. Le direzioni canoniche (verso di sguardo eye→target) sono
 in `src/fusion_build.py` `VIEW_CAMERA` (front=+Y, side=−X, back=−Y, three_quarter=iso) — usa
-**le stesse** negli step e nel gate, così i render combaciano con `refs/`.
+**le stesse** negli step e nel gate, così i render combaciano con `refs/`. Per le firme `adsk`
+del render (`Camera.eye`/`target`/`upVector`, `Viewport.saveAsImageFile`) fai lookup nella doc
+locale se incerto (§"Documentazione API locale").
 
 ### Template prompt per l'executor (Sonnet)
 
@@ -334,6 +338,11 @@ in `src/fusion_build.py` `VIEW_CAMERA` (front=+Y, side=−X, back=−Y, three_qu
 > - **Budget ~30s per chiamata**: se lo step è pesante, spezzalo in più chiamate e fai snapshot.
 > - Per annullare: tool **`undo`** (rollback puntuale) oppure **riapri l'ultimo `.f3d` buono**.
 > - `execute_code` SOLO per il render di verifica; tutta la geometria via tool granulari.
+> - **Doc API locale — non indovinare se puoi verificare.** Prima di scrivere `adsk.*` in
+>   `execute_code`, o se un tool granulare erra per firma sconosciuta, fai lookup lessicale:
+>   `uv run python fusion-docs/search.py "<keyword adsk>" -k 5` → poi `Read` del path md assoluto
+>   stampato. Cerca per **identificatore** (`saveAsImageFile`, `boundingBox`, `Camera eye`,
+>   `Joints add`), NON per il nome snake_case del tool.
 >
 > Procedura (sequenza di chiamate granulari, una per volta):
 > 1. Leggi lo stato con `get_scene_info`; se serve, `set_design_type` → parametrico.
@@ -399,7 +408,8 @@ del manifest** + giudizio visivo per-vista, **focalizzato su geometria e simmetr
    - bbox del modello: **SOLO via `execute_code`** (`body.boundingBox` / bbox del component, in
      **cm**) → ×10 = **mm** vs `target_mm` (quote-target dal prompt/`strategy`, es. 89×130×3) →
      `proportion_error_pct`. Nessun tool granulare espone la bbox (`get_physical_properties` dà
-     massa/volume/centro di massa, NON la bbox).
+     massa/volume/centro di massa, NON la bbox). Per le firme `adsk` (`BRepBody.boundingBox`,
+     `BoundingBox3D`, `BRepBody.isSolid`) fai lookup nella doc locale se incerto.
    - **scarto di simmetria per asse**: scostamento rispetto al piano di simmetria (bbox specchiata,
      via `execute_code`) → `symmetry_dev_mm` per asse (in mm); usa **`get_physical_properties`**
      (centro di massa) come supporto e `measure_distance` per check puntuali.
@@ -483,7 +493,8 @@ Poi esegui la pipeline normale (§2–§5) con due differenze (il manifest è gi
 - Il **piano è di rifinitura**: lo **step 1 NON crea geometria nuova** ma carica il modello —
   apri `<seed.f3d assoluto>` come documento attivo. faust-machines non risulta avere un tool
   granulare di apertura: usa `execute_code` (`app.documents.open(...)` / import del Fusion Archive)
-  *[da verificare sul Mac; se emergesse un tool nativo di apertura, preferiscilo]*. Gli step
+  *[da verificare sul Mac; se emergesse un tool nativo di apertura, preferiscilo]*. Per la firma
+  esatta fai lookup: `fusion-docs/search.py "documents open"` → `Documents.open`. Gli step
   successivi **mirano ai `planning_hints`** (i gap da chiudere), restando su geometria/simmetria
   e sulle parti del manifest ancora carenti. Essendo parametrico, spesso basta **modificare le
   quote di sketch/feature** esistenti invece di ricostruire.
@@ -491,6 +502,43 @@ Poi esegui la pipeline normale (§2–§5) con due differenze (il manifest è gi
 
 A fine pipeline gira un nuovo gate (§5); le iterazioni restano tracciate in metadata
 (`iteration`, `parent_build`, `evaluations`).
+
+## Documentazione API locale — lookup lessicale (usalo PRIMA di indovinare l'API)
+
+C'è una **knowledge base offline dell'API Fusion** in `run/fusion-docs/` (markdown + indice
+lessicale SQLite FTS5/BM25, estratta dal CHM ufficiale). Serve a scrivere il Python `adsk.*`
+**giusto al primo colpo** invece di tirare a indovinare. **Consultala** in due casi:
+- **prima** di scrivere `adsk.*` dentro `mcp__fusion__execute_code` (camera/`saveAsImageFile`,
+  `boundingBox`, `isSolid`, `app.documents.open`, proprietà fisiche…);
+- **quando un tool granulare erra per firma sconosciuta** → cerca l'API `adsk.*` sottostante per
+  capire parametri/tipi (è un punto del self-heal del retry-loop).
+
+Comando (dalla cwd RUN = `run/`), poi `Read` del path md **assoluto** stampato:
+```
+uv run python fusion-docs/search.py "<identificatore o keyword>" -k 5
+```
+È **lessicale**: cerca per **identificatore/nome** di classe o membro (o poche keyword), NON per
+frase concettuale lunga e **NON per il nome snake_case del tool MCP**. Per trovare l'API dietro a
+un tool granulare, cerca il **concetto `adsk`**, non il nome del tool:
+
+| serve…                         | query efficace            | pagina top |
+|--------------------------------|---------------------------|------------|
+| render vista                   | `saveAsImageFile`         | `Viewport.saveAsImageFile` |
+| posa camera                    | `Camera eye`              | `Camera.eye` / `CameraTypes` |
+| bbox per il gate               | `boundingBox`             | `BRepBody.boundingBox` |
+| watertight / solido            | `isSolid`                 | `BRepBody.isSolid` |
+| aprire il seed in re-iterazione| `documents open`          | `Documents.open` |
+| joint (tool `add_joint`)       | `Joints add`              | `Joints.add` / `JointInput` |
+| sketch (tool `create_sketch`)  | `Sketches add`            | `Sketches.add` |
+
+Resta **grounding**, non oracolo: per i tool granulari la firma autorevole è lo **schema esposto
+dal server** + il messaggio d'errore (vedi gotcha sotto); la doc spiega l'API `adsk` che quei tool
+incapsulano e quella che usi in `execute_code`.
+
+> **Precondizione (una tantum, sul Mac):** la doc è un artefatto **gitignored**. Se `search.py`
+> dà `no matches` o manca `fusion-docs/docs.db`, costruiscila una volta:
+> `bash fusion-docs/extract_chm.sh && uv run python fusion-docs/parse_html.py && uv run python fusion-docs/build_index.py`
+> (dettagli in `fusion-docs/README.md`). `Bash(uv run *)` è già pre-concesso in RUN: nessun prompt.
 
 ## Toolbox parametrico Fusion (preferenze — privilegiare SEMPRE l'esatto per costruzione)
 
@@ -512,6 +560,9 @@ A fine pipeline gira un nuovo gate (§5); le iterazioni restano tracciate in met
 - **Export** → `export_f3d`, `export_step`, `export_stl`.
 - **VIETATO** (salvo banalità): mesh / editing per-vertice; **`move_body`/trasformazioni assolute**
   per posizionare le parti (usa joints); boolean "sporchi" su mesh.
+- **Firma o parametri incerti** (di un tool granulare o dell'API `adsk` in `execute_code`)? →
+  **lookup lessicale** della doc locale (§"Documentazione API locale"):
+  `uv run python fusion-docs/search.py "<keyword>"` → Read del md. Non indovinare.
 
 ## Gotcha / principi (applicarli SEMPRE)
 
@@ -541,7 +592,11 @@ aggiornare l'auto-memory fuori repo: la fonte canonica è il file in `run/`.
 - **Render+bbox solo via `execute_code`**: il server non ha tool di screenshot né di bbox; usa
   `execute_code` SOLO per quello, mai per costruire geometria.
 - **Firme dei tool non documentate**: alla prima chiamata di un tool nuovo affidati allo schema
-  esposto dal server e, se erra, leggi il messaggio del tool e correggi.
+  esposto dal server e, se erra, leggi il messaggio del tool e correggi. Per l'**API `adsk.*`
+  sottostante** (e per il Python che scrivi in `execute_code`) usa il **lookup lessicale** della
+  doc locale `fusion-docs/` (`uv run python fusion-docs/search.py "<keyword>"` → Read del md) —
+  vedi §"Documentazione API locale". Cerca per identificatore `adsk` (es. `Joints add`), non per
+  nome snake_case del tool.
 - **Riferimenti stabili**: per joints/feature usa geometria nominata (piani-feature / facce /
   spigoli), non indici di facce volatili che cambiano alla rigenerazione.
 - **Diagnostica**: rendi le 4 pose canoniche (front/side/back ortografiche + 3/4 iso),

@@ -69,6 +69,21 @@ You can also just `rg` the markdown directly: `rg -i "addSimple" run/fusion-docs
 Namespaces: `adsk::fusion` 10,675 · `adsk::core` 3,422 · `adsk::cam` 2,126 ·
 `adsk::electron` 1,091 · `adsk::volume` 217 · `adsk::drawing` 63.
 
+## Uso da `fusion-build`
+
+La skill `fusion-build` (`run/.claude/skills/fusion-build/`) usa questa doc come **lookup
+dell'API Fusion** per scrivere il Python `adsk.*` giusto (render `saveAsImageFile`, `boundingBox`,
+`isSolid`, `documents open`, joints) senza indovinare, e per capire l'API `adsk` dietro ai tool
+MCP granulari (le cui firme non sono documentate). Gli executor/giudice lanciano, dalla cwd RUN:
+
+```bash
+uv run python fusion-docs/search.py "<keyword adsk>" -k 5   # poi Read del path md assoluto stampato
+```
+
+Cercano per **identificatore** (`saveAsImageFile`, `Joints add`), non per il nome snake_case del
+tool MCP. `search.py` stampa path **assoluti** così i subagent leggono il md da qualunque cwd.
+Precondizione: la doc va costruita una volta (i comandi sopra); `docs.db`/`md/` sono gitignored.
+
 ## How search works
 
 - `parse_html.py` is **defensive**: it keys off stable textual section labels rendered in the
