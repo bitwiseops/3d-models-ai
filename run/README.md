@@ -64,6 +64,18 @@ introspezionale sul Mac (lista tool + schema) e annota in `run/fusion_build_less
 al **conflitto porta 9876 con blender-mcp** (non tenere i due add-in attivi insieme). Le lezioni
 Fusion stanno in `run/fusion_build_lessons.md`.
 
+### Variante: `fusion-build-from-transcript`
+
+Sperimentale: stesso backend di costruzione di `fusion-build`, ma l'input è il **transcript di una
+video-guida** (file di testo) invece delle 4 viste. Pre-elabora il transcript grezzo in un
+**action-log** (split in chunk → fold sequenziale con un agente Sonnet per chunk che estende il log →
+review/consolidamento Opus → `transcript/action_log.json`), poi parser/planner/executor come
+fusion-build. Costruzione **esatta** seguendo le quote dette nel video. Verifica **semantica**: il
+giudice confronta i render con `expected_summary` (descrizione attesa dal transcript), **senza
+immagini di riferimento**. Helper: subcomandi `init-transcript` / `chunk-transcript` /
+`save-action-log` in `src/fusion_build.py`. Gli stadi di testo (pre-elaborazione → piano) girano
+**senza Fusion**; l'MCP serve solo dall'esecuzione in poi. Stessa precondizione MCP di `fusion-build`.
+
 ## Note
 
 - Modifiche a MCP / skill / settings richiedono un **riavvio** di Claude dalla cwd giusta per

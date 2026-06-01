@@ -192,6 +192,126 @@ def init_build_session(source_dir: Path) -> Path:
     return build_dir
 
 
+# --- Variante transcript ---------------------------------------------------
+# La skill `fusion-build-from-transcript` ricostruisce un oggetto a partire dal
+# TRANSCRIPT di un video tutorial (non dalle 4 viste). Il transcript grezzo viene
+# pre-elaborato in un action-log strutturato (chunk → fold sequenziale Sonnet →
+# review Opus) PRIMA del parsing percettivo. Questi helper sono il solo pezzo che
+# differisce dal percorso a immagini: bootstrap senza refs/, chunking
+# deterministico, persistenza dell'action-log. Tutto il resto (save-manifest,
+# save-plan, paths, record, eval-paths, record-eval, reinit) è riusato invariato.
+
+
+def init_transcript_session(transcript_file: Path, title: str | None = None) -> Path:
+    """Crea outputs/fusion/<ts-slug>/ a partire da un file di transcript.
+
+    Gemella di init_build_session ma SENZA 4 viste: copia il transcript grezzo in
+    transcript/source.txt, non crea refs/, e parte dallo stato 'preprocessing'
+    (lo stadio che produce l'action-log). Ritorna la build dir.
+    """
+    transcript_file = transcript_file.resolve()
+    text = transcript_file.read_text(encoding="utf-8")
+    ts = datetime.now().strftime("%Y%m%d-%H%M%S")
+    slug = storage._slugify(title or text)
+    build_dir = FUSION_OUTPUTS_ROOT / f"{ts}-{slug}"
+    (build_dir / "prompts").mkdir(parents=True, exist_ok=True)
+    (build_dir / "transcript").mkdir(parents=True, exist_ok=True)
+    (build_dir / "steps").mkdir(parents=True, exist_ok=True)
+
+    (build_dir / "transcript" / "source.txt").write_text(text, encoding="utf-8")
+    (build_dir / "prompts" / "00_source.txt").write_text(
+        f"# input: transcript{f' — {title}' if title else ''}\n\n"
+        "Ricostruzione da video tutorial: segui le quote ESATTE dette nel video "
+        "(costruzione esatta, non proporzionale).\n",
+        encoding="utf-8",
+    )
+
+    metadata = {
+        "created_at": ts,
+        "kind": "fusion_build_transcript",
+        "status": "preprocessing",
+        "title": title,
+        "prompt": title or "",
+        "transcript_path": "transcript/source.txt",
+        "action_log_path": "transcript/action_log.json",
+        "manifest_path": "manifest.json",
+        "plan_path": "plan.json",
+        "views": {},
+        "steps": [],
+        "iteration": 1,
+        "evaluations": [],
+        "claude_usage": {"by_model": {}},
+    }
+    (build_dir / "metadata.json").write_text(
+        json.dumps(metadata, indent=2, ensure_ascii=False), encoding="utf-8"
+    )
+    return build_dir
+
+
+def chunk_transcript(build_dir: Path, words: int = 1500, overlap: int = 150) -> dict:
+    """Split DETERMINISTICO di transcript/source.txt in finestre di ~`words` parole
+    con `overlap` parole di sovrapposizione, scritte in transcript/chunks/chunk_NN.txt.
+
+    L'overlap evita di spezzare un'istruzione a cavallo di due chunk. Se il testo è
+    corto (< 2*words) ritorna un solo chunk (single-pass, niente artefatti ai bordi).
+    Ritorna {chunks: [path assoluti in ordine], count, single_pass}.
+    """
+    if overlap < 0 or overlap >= words:
+        raise ValueError("overlap deve essere >= 0 e < words")
+    source = (build_dir / "transcript" / "source.txt").resolve()
+    tokens = source.read_text(encoding="utf-8").split()
+    chunks_dir = (build_dir / "transcript" / "chunks").resolve()
+    chunks_dir.mkdir(parents=True, exist_ok=True)
+    # ripulisci eventuali chunk di una run precedente
+    for old in chunks_dir.glob("chunk_*.txt"):
+        old.unlink()
+
+    single_pass = len(tokens) < 2 * words
+    windows: list[list[str]] = []
+    if single_pass:
+        windows.append(tokens)
+    else:
+        step = words - overlap
+        for start in range(0, len(tokens), step):
+            window = tokens[start:start + words]
+            if window:
+                windows.append(window)
+            if start + words >= len(tokens):
+                break
+
+    paths: list[str] = []
+    for i, window in enumerate(windows, start=1):
+        p = chunks_dir / f"chunk_{i:02d}.txt"
+        p.write_text(" ".join(window), encoding="utf-8")
+        paths.append(str(p))
+
+    return {"chunks": paths, "count": len(paths), "single_pass": single_pass}
+
+
+def save_action_log(build_dir: Path, action_log: dict) -> dict:
+    """Salva l'action-log consolidato (output della pre-elaborazione) in
+    transcript/action_log.json e porta lo stato 'preprocessing' → 'parsing'.
+
+    Validazione leggera: `actions` lista non vuota, ogni azione con `op`.
+    """
+    actions = action_log.get("actions")
+    if not isinstance(actions, list) or not actions:
+        raise ValueError("action-log non valido: 'actions' deve essere una lista non vuota.")
+    for i, a in enumerate(actions):
+        if not a.get("op"):
+            raise ValueError(f"action-log non valido: azione #{i} senza 'op'.")
+
+    path = build_dir / "transcript" / "action_log.json"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(action_log, indent=2, ensure_ascii=False), encoding="utf-8")
+    _patch_metadata(build_dir, lambda d: d.update(status="parsing"))
+    return {
+        "action_log_path": str(path),
+        "n_actions": len(actions),
+        "open_questions": action_log.get("open_questions") or [],
+    }
+
+
 def save_manifest(build_dir: Path, manifest: dict) -> dict:
     """Salva il part-manifest (output dello stadio di parsing percettivo, §1) e
     porta lo stato 'parsing' → 'planning'. Il manifest è la SINGLE SOURCE OF TRUTH
@@ -473,6 +593,19 @@ def main(argv: list[str] | None = None) -> None:
     p = sub.add_parser("init", help="crea build session da una sessione Oggetti")
     p.add_argument("source_dir")
 
+    p = sub.add_parser("init-transcript", help="crea build session da un file di transcript")
+    p.add_argument("transcript_file")
+    p.add_argument("--title", default=None)
+
+    p = sub.add_parser("chunk-transcript", help="split deterministico del transcript in chunk")
+    p.add_argument("build_dir")
+    p.add_argument("--words", type=int, default=1500)
+    p.add_argument("--overlap", type=int, default=150)
+
+    p = sub.add_parser("save-action-log", help="salva action_log.json (da file) e stato=parsing")
+    p.add_argument("build_dir")
+    p.add_argument("action_log_file")
+
     p = sub.add_parser("inputs", help="stampa prompt + path viste della sorgente")
     p.add_argument("source_dir")
 
@@ -514,6 +647,13 @@ def main(argv: list[str] | None = None) -> None:
 
     if args.cmd == "init":
         out = {"build_dir": str(init_build_session(Path(args.source_dir)))}
+    elif args.cmd == "init-transcript":
+        out = {"build_dir": str(init_transcript_session(Path(args.transcript_file), args.title))}
+    elif args.cmd == "chunk-transcript":
+        out = chunk_transcript(Path(args.build_dir), args.words, args.overlap)
+    elif args.cmd == "save-action-log":
+        action_log = json.loads(Path(args.action_log_file).read_text(encoding="utf-8"))
+        out = save_action_log(Path(args.build_dir), action_log)
     elif args.cmd == "inputs":
         src = load_source_inputs(Path(args.source_dir))
         out = {
