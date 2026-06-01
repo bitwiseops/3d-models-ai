@@ -106,6 +106,11 @@ viste in una sola vista vengano "dimenticate" durante la pianificazione.
    ```
    → ritorna `{"build_dir": "outputs/fusion/<ts-slug>"}`. Copia già le 4 viste in
    `refs/`, scrive `prompts/00_source.txt` e `metadata.json` (**status=parsing**).
+   **Genera anche le LENTI percettive** di ogni vista in `refs/lenses/<view>__{edges,
+   silhouette,color}.png` (mappa in `metadata.ref_lenses`) — varianti filtrate che il
+   parser legge ACCANTO all'originale per descrivere l'oggetto con più accuratezza
+   (contorni, separazione tra parti, proporzioni). Se mai mancassero (build vecchia o
+   refs aggiornate), rigenerale con `uv run python -m src.fusion_build make-lenses <build_dir>`.
 2. Lancia **un** subagent **parser** con il tool **Agent**:
    - `subagent_type: general-purpose`, `model: opus` — **sola percezione**: gli servono solo
      `Read` (le 4 viste) e `Write` (il manifest). **NIENTE MCP / niente Fusion** in questo stadio.
@@ -146,18 +151,32 @@ vocabolario di blender-build): l'executor lo mappa al modo di costruzione Fusion
 > (front / three_quarter / side / back). Niente CAD, niente codice: solo osservazione.
 >
 > DESCRIZIONE: {prompts/00_source.txt}
-> VISTE (aprile tutte con Read): {refs/front.png, refs/three_quarter.png, refs/side.png, refs/back.png}
+> VISTE ORIGINALI (aprile tutte con Read): {refs/front.png, refs/three_quarter.png, refs/side.png, refs/back.png}
+> LENTI per ogni vista (aprile con Read accanto all'originale): {refs/lenses/<view>__edges.png,
+>   refs/lenses/<view>__silhouette.png, refs/lenses/<view>__color.png} — i path esatti sono in
+>   `metadata.ref_lenses`. Sono varianti FILTRATE della STESSA vista, non parti nuove.
 >
 > Procedura:
-> 1. **Enumera le parti per ciascuna vista** separatamente (cosa vedi in front, poi in side, ecc.).
-> 2. **Riconcilia tra le viste**: decidi quali osservazioni sono la STESSA parte vista da angoli
->    diversi e quali sono parti DISTINTE. Una feature visibile in una sola vista va comunque tenuta
->    (non scartarla perché le altre viste non la mostrano).
-> 3. Per ogni parte: `id` univoco e parlante, `primitive_type` (la primitiva geometrica più vicina),
+> 1. **Guarda ogni vista attraverso più LENTI** prima di enumerare. Ogni filtro rende leggibile un
+>    aspetto diverso; incrociali con l'originale (per colori/materiali) e tra loro:
+>    - `edges` → **contorno esterno + linee di feature interne** (scanalature, giunzioni, spigoli,
+>      fori): usala per silhouette netta, dettagli geometrici e proporzioni.
+>    - `silhouette` → **maschera piena oggetto/sfondo**: usala per proporzioni e SIMMETRIA (specchia
+>      mentalmente sull'asse e verifica che combaci).
+>    - `color` → **regioni a tinta piatta**: usala per separare **parti DISTINTE** e raggruppamenti
+>      per materiale (campi di colore diversi = di norma parti/materiali diversi).
+> 2. **Enumera le parti per ciascuna vista** separatamente (cosa vedi in front, poi in side, ecc.),
+>    sintetizzando le evidenze delle lenti.
+> 3. **Riconcilia tra le viste**: decidi quali osservazioni sono la STESSA parte vista da angoli
+>    diversi e quali sono parti DISTINTE. Una feature visibile in una sola vista (o in una sola
+>    lente) va comunque tenuta (non scartarla perché le altre non la mostrano).
+> 4. Per ogni parte: `id` univoco e parlante, `primitive_type` (la primitiva geometrica più vicina),
 >    `parameters` **relativi/proporzionali** (forma e proporzioni, NON quote in mm), `relations`
 >    verso altre parti (attacco/sopra/dentro/concentrico/a-filo/simmetria), `details` geometrici
->    (raccordi, fori, scanalature, smussi), `source_views` (dove l'hai vista), `confidence`.
-> 4. Ciò che resta **ambiguo o non risolvibile** dalle viste → `open_questions` (testo libero).
+>    (raccordi, fori, scanalature, smussi — incl. linee viste solo in `edges`), `source_views` (dove
+>    l'hai vista), `confidence` (**più alta quando più lenti concordano**; più bassa se una sola
+>    lente o una sola vista la suggerisce).
+> 5. Ciò che resta **ambiguo o non risolvibile** dalle viste/lenti → `open_questions` (testo libero).
 >
 > RITORNA come testo finale = valore SOLO il JSON del manifest (schema: `{"parts":[...],
 > "open_questions":[...]}`). Niente altro testo. Scrivilo anche nel file manifest che ti è indicato.
@@ -418,12 +437,18 @@ del manifest** + giudizio visivo per-vista, **focalizzato su geometria e simmetr
 3. **Render pulito delle 4 viste** del modello (via `execute_code`): pose canoniche `VIEW_CAMERA`
    (front=+Y, side=−X, back=−Y, three_quarter=iso; up=+Z), ortografica per front/right/back,
    `viewport.fit()`, poi `saveAsImageFile` salvando in `views[...]` di `eval-paths`. **Stesse pose**
-   usate negli step.
+   usate negli step. Poi **genera le lenti dei render** (per confronto omogeneo con le ref):
+   ```
+   uv run python -m src.fusion_build make-lenses <build_dir> --iter N
+   ```
+   → crea `eval/iter_NN/lenses/<view>__{edges,silhouette}.png` (solo `edges`+`silhouette`: il
+   giudice IGNORA i colori). Le ref hanno già le proprie lenti in `refs/lenses/` (dall'`init`).
 4. **Giudizio visivo per-vista + copertura manifest** — lancia **un** subagent giudice (Sonnet)
    col **template giudice** sotto, passandogli anche `manifest.json`: per ogni vista confronta il
-   render con `refs/<view>.png` su **silhouette/forma/proporzioni/simmetria** (NON colore) →
-   `score` 0–100 + note + `actionable_gaps` geometrici concreti; e per ogni parte del manifest
-   verifica presenza/relazioni → `parts_check`.
+   render con `refs/<view>.png` — **e le rispettive lenti `edges`/`silhouette`** (render-lens ↔
+   ref-lens) — su **silhouette/forma/proporzioni/simmetria** (NON colore) → `score` 0–100 + note +
+   `actionable_gaps` geometrici concreti; e per ogni parte del manifest verifica
+   presenza/relazioni → `parts_check`.
 5. Componi `verdict.json` nel path `verdict` (schema sotto: metriche + per-vista + `parts_check`
    + `overall_score` + `actionable_gaps`), poi:
    ```
@@ -459,14 +484,18 @@ Schema `verdict.json`:
 > simmetria, presenza/posizione delle feature geometriche. IGNORA colori, materiali,
 > illuminazione, sfondo.
 >
-> Per ogni vista ti do due immagini: il render del modello e la `ref` corrispondente. Aprile
-> con Read. Per ciascuna vista assegna uno `score` 0–100 (100 = silhouette/proporzioni/
-> simmetria coincidono) e note brevi. Poi, usando il MANIFEST, per ogni parte verifica se è
-> **presente** nel modello e se le sue **relazioni** sono rispettate → `parts_check`. Infine
-> elenca `actionable_gaps`: differenze GEOMETRICHE concrete e correggibili (es. "bordo inferiore
-> troppo spesso", "manca la parte handle", "spigolo non raccordato"), non estetiche.
+> Per ogni vista ti do il render del modello, la `ref` corrispondente e, per entrambi, le LENTI
+> `edges` (contorno + linee di feature) e `silhouette` (maschera piena). Aprile tutte con Read.
+> **Usa le lenti per uno score più preciso**: sovrapponi mentalmente le `silhouette` per giudicare
+> proporzioni e simmetria, e le `edges` per allineare contorni e dettagli (spigoli, scanalature).
+> Per ciascuna vista assegna uno `score` 0–100 (100 = silhouette/proporzioni/simmetria coincidono)
+> e note brevi. Poi, usando il MANIFEST, per ogni parte verifica se è **presente** nel modello e se
+> le sue **relazioni** sono rispettate → `parts_check`. Infine elenca `actionable_gaps`: differenze
+> GEOMETRICHE concrete e correggibili (es. "bordo inferiore troppo spesso", "manca la parte handle",
+> "spigolo non raccordato"), non estetiche.
 >
-> VISTE (render ↔ ref): {front: <render> ↔ <refs/front.png>, ...}
+> VISTE (render ↔ ref, con lenti): {front: <render> + <eval/iter_NN/lenses/front__{edges,silhouette}.png>
+>   ↔ <refs/front.png> + <refs/lenses/front__{edges,silhouette}.png>, ...}
 > MANIFEST (parti attese): {manifest.json}
 > METRICHE OGGETTIVE (contesto): {bbox_mm, target_mm, symmetry_dev_mm, watertight}
 >

@@ -27,7 +27,7 @@ import shutil
 from datetime import datetime
 from pathlib import Path
 
-from . import config, storage
+from . import config, image_lenses, storage
 
 FUSION_OUTPUTS_ROOT = config.OUTPUTS_ROOT / "fusion"
 
@@ -161,10 +161,19 @@ def init_build_session(source_dir: Path) -> Path:
     (build_dir / "steps").mkdir(parents=True, exist_ok=True)
 
     view_rel: dict[str, str] = {}
+    copied: dict[str, Path] = {}
     for name, p in src["views"].items():
         dst = build_dir / "refs" / f"{name}.png"
         shutil.copy2(p, dst)
         view_rel[name] = f"refs/{name}.png"
+        copied[name] = dst
+
+    # Lenti percettive (edges/silhouette/color) delle 4 viste: il parser §1 le
+    # legge accanto all'originale per un manifest più accurato (vedi image_lenses).
+    ref_lenses = _rel_lenses(
+        build_dir,
+        image_lenses.generate_lenses(copied, build_dir / "refs" / "lenses"),
+    )
 
     (build_dir / "prompts" / "00_source.txt").write_text(
         f"# source session: {src['source_session']} (iter {src['version']})\n\n"
@@ -181,6 +190,7 @@ def init_build_session(source_dir: Path) -> Path:
         "manifest_path": "manifest.json",
         "plan_path": "plan.json",
         "views": view_rel,
+        "ref_lenses": ref_lenses,
         "steps": [],
         "iteration": 1,
         "evaluations": [],
@@ -415,6 +425,47 @@ def eval_paths(build_dir: Path, iteration: int | None = None) -> dict:
     }
 
 
+def _rel_lenses(build_dir: Path, abs_map: dict[str, dict[str, str]]) -> dict[str, dict[str, str]]:
+    """Converte la mappa {view: {lens: path_assoluto}} in path RELATIVI a build_dir
+    (coerente con come `views` salva 'refs/front.png'): rende il metadata portabile."""
+    base = build_dir.resolve()
+    return {
+        v: {lens: str(Path(p).resolve().relative_to(base)) for lens, p in lm.items()}
+        for v, lm in abs_map.items()
+    }
+
+
+def make_lenses(build_dir: Path, iteration: int | None = None) -> dict:
+    """Genera le lenti percettive (edges/silhouette/color) sulle immagini.
+
+    - senza `iteration`: lenti delle 4 viste di riferimento (`refs/<view>.png`) →
+      `refs/lenses/`, con TUTTE le lenti; aggiorna `metadata['ref_lenses']`.
+    - con `iteration`: lenti dei render del gate (`eval/iter_NN/<view>.png`) →
+      `eval/iter_NN/lenses/`, solo `edges`+`silhouette` (il giudice ignora i colori).
+
+    Le lenti le legge il subagent (parser/giudice) ACCANTO all'originale per una
+    descrizione/confronto più accurati. Ritorna {"lenses": {view: {lens: abs}}}.
+    """
+    build_dir = build_dir.resolve()
+    if iteration is None:
+        views = {n: build_dir / "refs" / f"{n}.png" for n in VIEW_NAMES}
+        abs_map = image_lenses.generate_lenses(
+            {n: p for n, p in views.items() if p.exists()},
+            build_dir / "refs" / "lenses",
+            lenses=image_lenses.DEFAULT_LENSES,
+        )
+        _patch_metadata(build_dir, lambda d: d.update(ref_lenses=_rel_lenses(build_dir, abs_map)))
+    else:
+        evd = (build_dir / "eval" / f"iter_{iteration:02d}").resolve()
+        views = {n: evd / f"{n}.png" for n in VIEW_NAMES}
+        abs_map = image_lenses.generate_lenses(
+            {n: p for n, p in views.items() if p.exists()},
+            evd / "lenses",
+            lenses=image_lenses.GATE_LENSES,
+        )
+    return {"iteration": iteration, "lenses": abs_map}
+
+
 def _decide(overall_score, actionable_gaps, iteration: int) -> dict:
     """Regola deterministica del gate: raccomanda 'reiterate' solo se il punteggio
     è sotto soglia E ci sono gap azionabili E non si è raggiunto il cap iterazioni;
@@ -490,11 +541,20 @@ def reinit_from_result(prev_build_dir: Path) -> dict:
 
     # input invariati: stessi 4 refs della build precedente
     view_rel: dict[str, str] = {}
+    copied: dict[str, Path] = {}
     for name in VIEW_NAMES:
         src_ref = prev_build_dir / "refs" / f"{name}.png"
         if src_ref.exists():
-            shutil.copy2(src_ref, build_dir / "refs" / f"{name}.png")
+            dst = build_dir / "refs" / f"{name}.png"
+            shutil.copy2(src_ref, dst)
             view_rel[name] = f"refs/{name}.png"
+            copied[name] = dst
+
+    # rigenera le lenti percettive sulle refs (input invariati → stesse lenti)
+    ref_lenses = _rel_lenses(
+        build_dir,
+        image_lenses.generate_lenses(copied, build_dir / "refs" / "lenses"),
+    )
 
     # modello di partenza
     shutil.copy2(seed_src, build_dir / "seed.f3d")
@@ -525,6 +585,7 @@ def reinit_from_result(prev_build_dir: Path) -> dict:
         "manifest_path": "manifest.json" if has_manifest else None,
         "plan_path": "plan.json",
         "views": view_rel,
+        "ref_lenses": ref_lenses,
         "steps": [],
         "iteration": iteration,
         "evaluations": [],
@@ -632,6 +693,11 @@ def main(argv: list[str] | None = None) -> None:
     p.add_argument("build_dir")
     p.add_argument("value")
 
+    p = sub.add_parser("make-lenses", help="genera le lenti percettive (edges/silhouette/color)")
+    p.add_argument("build_dir")
+    p.add_argument("--iter", dest="iteration", type=int, default=None,
+                   help="se presente: lenti dei render del gate eval/iter_NN/ (edges+silhouette)")
+
     p = sub.add_parser("eval-paths", help="path assoluti render+verdict del gate (iterazione)")
     p.add_argument("build_dir")
     p.add_argument("iteration", type=int, nargs="?", default=None)
@@ -683,6 +749,8 @@ def main(argv: list[str] | None = None) -> None:
     elif args.cmd == "status":
         set_status(Path(args.build_dir), args.value)
         out = {"ok": True, "status": args.value}
+    elif args.cmd == "make-lenses":
+        out = make_lenses(Path(args.build_dir), args.iteration)
     elif args.cmd == "eval-paths":
         out = eval_paths(Path(args.build_dir), args.iteration)
     elif args.cmd == "record-eval":
