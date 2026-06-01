@@ -3,7 +3,72 @@
     "allow": [
       "mcp__blender__execute_blender_code",
       "mcp__blender__get_viewport_screenshot",
-      "mcp__fusion__execute_fusion_code",
+      "mcp__fusion__execute_code",
+
+      "mcp__fusion__ping",
+      "mcp__fusion__get_scene_info",
+      "mcp__fusion__get_object_info",
+      "mcp__fusion__list_components",
+      "mcp__fusion__get_design_type",
+      "mcp__fusion__set_design_type",
+
+      "mcp__fusion__create_sketch",
+      "mcp__fusion__draw_rectangle",
+      "mcp__fusion__draw_circle",
+      "mcp__fusion__draw_line",
+      "mcp__fusion__draw_arc",
+      "mcp__fusion__draw_spline",
+      "mcp__fusion__create_polygon",
+      "mcp__fusion__add_constraint",
+      "mcp__fusion__add_dimension",
+      "mcp__fusion__offset_curve",
+      "mcp__fusion__trim_curve",
+      "mcp__fusion__project_geometry",
+
+      "mcp__fusion__extrude",
+      "mcp__fusion__revolve",
+      "mcp__fusion__sweep",
+      "mcp__fusion__loft",
+      "mcp__fusion__fillet",
+      "mcp__fusion__chamfer",
+      "mcp__fusion__shell",
+      "mcp__fusion__mirror",
+      "mcp__fusion__create_hole",
+      "mcp__fusion__rectangular_pattern",
+      "mcp__fusion__circular_pattern",
+      "mcp__fusion__split_body",
+      "mcp__fusion__scale_body",
+
+      "mcp__fusion__create_box",
+      "mcp__fusion__create_cylinder",
+      "mcp__fusion__create_sphere",
+      "mcp__fusion__create_torus",
+
+      "mcp__fusion__create_construction_plane",
+      "mcp__fusion__create_construction_axis",
+
+      "mcp__fusion__create_component",
+      "mcp__fusion__rename_body",
+      "mcp__fusion__move_body",
+      "mcp__fusion__boolean_operation",
+      "mcp__fusion__add_joint",
+      "mcp__fusion__create_as_built_joint",
+      "mcp__fusion__create_rigid_group",
+      "mcp__fusion__undo",
+
+      "mcp__fusion__measure_distance",
+      "mcp__fusion__measure_angle",
+      "mcp__fusion__get_physical_properties",
+      "mcp__fusion__check_interference",
+
+      "mcp__fusion__get_parameters",
+      "mcp__fusion__create_parameter",
+      "mcp__fusion__set_parameter",
+
+      "mcp__fusion__export_stl",
+      "mcp__fusion__export_step",
+      "mcp__fusion__export_f3d",
+
       "Bash(uv run *)"
     ],
     "deny": [

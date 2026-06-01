@@ -5,8 +5,8 @@
       "args": ["blender-mcp"]
     },
     "fusion": {
-      "type": "http",
-      "url": "http://127.0.0.1:27182/mcp"
+      "command": "uvx",
+      "args": ["fusion360-mcp-server", "--mode", "socket"]
     }
   }
 }

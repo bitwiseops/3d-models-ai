@@ -1,12 +1,12 @@
 ---
 name: fusion-build
-description: Costruisce in modo INCREMENTALE un modello 3D PARAMETRICO in Fusion 360 (live, via MCP) a partire dalla descrizione + 4 viste di una sessione Oggetti esistente. Copia-e-adatta della pipeline blender-build con backend CAD = Fusion: stesso flusso (parsing → manifest → piano → esecuzione → gate), ma la geometria è B-rep ESATTA per costruzione (sketch → extrude/revolve, NON mesh) e il posizionamento tra le parti si realizza con JOINTS/vincoli (coincident, concentric, flush), NON con trasformazioni assolute. Parte in AUTO MODE all'invocazione. Prima un parser Opus (subagent, sola percezione, niente MCP) estrae un PART-MANIFEST — l'inventario di COSA deve esistere (parti, primitive, relazioni); è la single source of truth. Poi un planner Opus (thinking medio) crea il piano focalizzato su GEOMETRIA e SIMMETRIA, ed executor Sonnet in sequenza applicano ogni step via API Fusion (`adsk.*`), si auto-verificano con render della viewport (saveAsImageFile) ripetendo fino a 3 volte, e salvano uno snapshot .f3d per modifica. Termina con un GATE DI CONVERGENZA che confronta input↔output e raccomanda in modo deterministico stop o re-iterazione. USARE quando l'utente chiede di "costruire/modellare in Fusion (360)" un oggetto da una sessione esistente. PRECONDIZIONE: Fusion 360 aperto su macOS/Windows, add-in MCP abilitato e server raggiungibile (vedi SETUP_MACOS.md).
+description: Costruisce in modo INCREMENTALE un modello 3D PARAMETRICO in Fusion 360 (live, via MCP) a partire dalla descrizione + 4 viste di una sessione Oggetti esistente. Copia-e-adatta della pipeline blender-build con backend CAD = Fusion: stesso flusso (parsing → manifest → piano → esecuzione → gate), ma la geometria è B-rep ESATTA per costruzione (sketch → extrude/revolve, NON mesh) e il posizionamento tra le parti si realizza con JOINTS/vincoli (coincident, concentric, flush), NON con trasformazioni assolute. Parte in AUTO MODE all'invocazione. Prima un parser Opus (subagent, sola percezione, niente MCP) estrae un PART-MANIFEST — l'inventario di COSA deve esistere (parti, primitive, relazioni); è la single source of truth. Poi un planner Opus (thinking medio) crea il piano focalizzato su GEOMETRIA e SIMMETRIA, ed executor Sonnet in sequenza applicano ogni step orchestrando i tool CAD granulari del server MCP (sketch/extrude/revolve/joint/export), usando `execute_code` solo per render della viewport (saveAsImageFile) e lettura bbox, ripetendo fino a 3 volte, e salvano uno snapshot .f3d per modifica. Termina con un GATE DI CONVERGENZA che confronta input↔output e raccomanda in modo deterministico stop o re-iterazione. USARE quando l'utente chiede di "costruire/modellare in Fusion (360)" un oggetto da una sessione esistente. PRECONDIZIONE: Fusion 360 aperto su macOS/Windows, add-in MCP abilitato e server raggiungibile (setup in `run/README.md`).
 ---
 
 # fusion-build — costruzione 3D parametrica incrementale live in Fusion 360
 
-Pipeline a **più stadi** orchestrata da Claude Code (questo agente) sul tool di esecuzione
-codice del server MCP Fusion: **parsing → piano → esecuzione → chiusura → gate**. Input: una
+Pipeline a **più stadi** orchestrata da Claude Code (questo agente) sui **tool CAD granulari** del
+server MCP Fusion (faust-machines): **parsing → piano → esecuzione → chiusura → gate**. Input: una
 sessione Oggetti esistente (`outputs/<ts-slug>/`) con prompt raffinato + i 4 crop del grid 2x2
 (front / three_quarter / side / back). Output: modello Fusion **parametrico** (B-rep) costruito
 incrementalmente, con storico `.f3d` per ogni modifica.
@@ -23,13 +23,23 @@ Niente IO a mano: usa sempre la CLI per init/manifest/plan/paths/record/status.
 Argomento della skill: il path della sessione Oggetti sorgente (es.
 `outputs/20260529-...-teapot`). Se manca, chiedi all'utente quale sessione usare.
 
-> **Tool MCP di esecuzione.** In questa skill `mcp__fusion__execute_fusion_code` indica il tool
-> del server Fusion che esegue **codice Python `adsk.*` arbitrario** sulla **coda main-thread**
-> dell'add-in. Il render di verifica si ottiene DENTRO lo script con
-> `app.activeViewport.saveAsImageFile(<png>, w, h)` — non serve un tool screenshot separato.
-> Il nome esatto del tool dipende dal server scelto: **confermalo sul Mac e, se diverso,
-> sostituisci QUESTO unico riferimento** (vedi `SETUP_MACOS.md`). Tutto il resto della skill non
-> dipende dalla superficie di tool del server.
+> **Modello a tool granulari + eccezione `execute_code`.** Il server `fusion` (faust-machines)
+> espone **84 tool CAD granulari** con prefisso `mcp__fusion__` (`create_sketch`, `draw_*`,
+> `add_constraint`, `add_dimension`, `extrude`, `revolve`, `fillet`, `shell`, `mirror`,
+> `create_hole`, `create_component`, `add_joint`, `export_stl/step/f3d`, …). **La costruzione si fa
+> chiamando questi tool granulari** — una operazione per chiamata, in sequenza.
+>
+> **Eccezione obbligata** — `mcp__fusion__execute_code` (Python `adsk.*` arbitrario sulla coda
+> main-thread dell'add-in): il server **NON ha alcun tool di render/screenshot né di bounding box**,
+> quindi `execute_code` si usa **SOLO** per (a) **render delle viste** —
+> `app.activeViewport.camera` + `viewport.fit()` + `saveAsImageFile(<png>, w, h)` — e (b) **lettura
+> `body.boundingBox`** per le metriche del gate (in cm). **Vietato** usarlo per costruire geometria:
+> per quello esistono i tool granulari.
+>
+> ⚠️ Le **firme dei parametri** dei tool granulari **non sono documentate** nel README di
+> faust-machines: alla prima chiamata di ogni tool nuovo fidati dello **schema esposto dal server**
+> e, in caso di errore, **leggi il messaggio del tool e correggi** (è uno dei punti di self-heal del
+> retry-loop). Le firme vanno introspezionate sul Mac (vedi `run/README.md`).
 
 ## Auto mode (default all'invocazione)
 
@@ -59,23 +69,25 @@ Restano gli unici punti in cui ti fermi (sicurezza / perdita dati):
 - **Unità interne = centimetri.** L'API Fusion lavora in **cm**: 1 mm = 0.1 cm. Scrivi le quote
   in cm, tonde e proporzionali. Il gate converte la bbox cm→mm (×10) prima di confrontarla con
   `target_mm`.
-- **Niente "undo" programmatico fragile.** Per annullare NON usare comandi di undo: **riapri
-  l'ultimo `.f3d` buono**, oppure riporta il marker della timeline indietro e cancella le
-  feature dopo di esso (vedi §3 e `run/fusion_build_lessons.md`).
+- **Annullare.** faust-machines espone un tool **`undo`** nativo: usalo per il **rollback puntuale**
+  dell'ultima operazione fallita. Per ripartire da uno **stato buono noto** (più operazioni da
+  scartare) **riapri l'ultimo `.f3d` buono**. Niente loop non limitati che mutano geometria (vedi
+  §3 e `run/fusion_build_lessons.md`).
 
 ## 0. Preflight (OBBLIGATORIO — la pipeline gira SOLO con Fusion connesso)
 
-1. Chiama `mcp__fusion__execute_fusion_code` con uno script minimo che legge lo stato (es.
-   `app = adsk.core.Application.get(); design = app.activeProduct; return design.rootComponent.name`).
+1. Chiama **`mcp__fusion__ping`** per verificare il bridge add-in (TCP 9876).
    - Se fallisce / va in timeout ⇒ Fusion non è connesso o l'add-in non è in esecuzione.
-     **Fermati** e di' all'utente: apri Fusion 360, abilita ed esegui l'add-in del server MCP
-     (Utilities → ADD-INS → Scripts and Add-Ins → Run), verifica che il server sia raggiungibile,
-     riavvia Claude da `run/`. Vedi **`SETUP_MACOS.md`**. Non creare nessuna build session finché
-     il preflight non passa.
-2. Se il documento attivo è **vuoto/nuovo** (nessun body, nessuna feature in timeline), in auto
-   mode procedi senza chiedere. Se contiene già **lavoro dell'utente** (body/feature/component),
-   chiedi conferma prima di lavorarci sopra o di crearne uno nuovo (perdita dati). In dubbio,
-   crea un **nuovo documento** (`app.documents.add(...)`) e lavora lì.
+     **Fermati** e di' all'utente: apri Fusion 360, abilita ed esegui l'add-in **Fusion360MCP**
+     (Shift+S → Add-Ins → Fusion360MCP → Run), verifica nel log `~/fusion360mcp.log` la riga
+     "[MCP] Server listening on localhost:9876", riavvia Claude da `run/`. Setup in `run/README.md`.
+     Non creare nessuna build session finché il preflight non passa.
+2. Leggi lo stato del documento con **`mcp__fusion__get_scene_info`** / **`list_components`**. Se è
+   **vuoto/nuovo** (nessun body/feature/component), in auto mode procedi senza chiedere. Se contiene
+   già **lavoro dell'utente**, chiedi conferma prima di lavorarci sopra o di crearne uno nuovo
+   (perdita dati). In dubbio, crea un **nuovo documento** e lavora lì (se non c'è un tool granulare
+   dedicato all'apertura/creazione documento, via `execute_code` `app.documents.add(...)`
+   — *[da confermare sul Mac]*).
 
 ## 1. Parsing percettivo — PART-MANIFEST (parser = Opus subagent, sola percezione)
 
@@ -226,11 +238,31 @@ Per ogni step in ordine:
    ```
    → `{"f3d": "...abs...", "stl": "...", "png": "...", "json": "..."}`.
 2. Lancia **un** subagent executor con il tool **Agent**:
-   - `subagent_type: general-purpose` (ha il tool `mcp__fusion__execute_fusion_code` + Write)
+   - `subagent_type: general-purpose` (ha i tool `mcp__fusion__*` granulari **+**
+     `mcp__fusion__execute_code` *(solo per il render di verifica e la lettura bbox)* + Write)
    - `model: sonnet`
    - prompt = **template executor** sotto, con piano completo, step corrente, **le parti del
      manifest citate in `step.manifest_parts`** (estratte da `manifest.json`), i path delle
      viste di riferimento (`<build_dir>/refs/<view>.png`), e i path artefatti dello step.
+
+> **L'executor orchestra una SEQUENZA di chiamate granulari** (una operazione per chiamata, in
+> ordine), NON scrive uno script `adsk.*`. Sequenza tipo per uno step (firme parametri
+> *[da confermare sul Mac]* — vedi box "Tool MCP"):
+> 1. **Stato / design type**: `get_scene_info`; se serve, `set_design_type` → parametrico.
+> 2. **Component**: `create_component` (ogni parte = un component proprio, per poterla jointare).
+> 3. **Sketch vincolato+quotato**: `create_sketch` (su piano/faccia) → `draw_rectangle`/
+>    `draw_circle`/`draw_line`/`draw_arc`/`draw_spline`/`create_polygon` → `add_constraint`
+>    (geometrici) → `add_dimension` (quote in **cm**).
+> 4. **Volume**: `extrude` (cubo/plane/profili) o `revolve` (cilindro/cono/sfera/toro e solidi di
+>    rivoluzione); `loft`/`sweep` per transizioni. Primitive dirette (`create_box`/`create_cylinder`/
+>    `create_sphere`/`create_torus`) ammesse solo per casi banali senza quote/relazioni.
+> 5. **Simmetria**: `mirror` sul piano di simmetria; `circular_pattern`/`rectangular_pattern`.
+> 6. **Dettagli**: `fillet`, `chamfer`, `create_hole`, `shell`; per scanalature un extrude-cut
+>    (sketch + `extrude` in modalità taglio *[da confermare]*); `boolean_operation` per join/cut.
+> 7. **Posizionamento**: `add_joint` (vedi mappa relazioni→joint); MAI `move_body`/trasformazione
+>    assoluta per piazzare una parte.
+> 8. **Verifica render**: via `execute_code` (vedi "Render di verifica") + Read sui PNG.
+> 9. **Snapshot + export**: `export_f3d` (snapshot step) e `export_stl` (per le metriche del gate).
 3. Quando il subagent ritorna il record strutturato, registralo:
    ```
    uv run python -m src.fusion_build record <build_dir> <record.json>
@@ -239,31 +271,37 @@ Per ogni step in ordine:
 
 **Best-effort** (come blender-build / SCAD): se uno step non converge entro i **3 tentativi**,
 salva il miglior tentativo, marca `status: "failed"` nel record con le note, e **prosegui**
-— lo storico resta completo.
+— lo storico resta completo. A ogni retry: usa **`undo`** per annullare l'ultima operazione fallita,
+oppure (essendo parametrico) ri-quota con `set_parameter`/`add_dimension`, oppure riapri l'ultimo
+`.f3d` buono; poi ri-verifica via render.
 
 ### Mappa relazioni del manifest → JOINTS / vincoli Fusion (il cuore della migrazione)
 
-Realizza il `relations[].type` del manifest come **joint relativo**, NON come posizione assoluta.
-Crea ogni componente **all'origine del suo sketch**, poi àncoralo al target con un joint che
-**referenzia geometria** (preferisci **JointOrigin** su facce/spigoli/punti nominati: riferimenti
-stabili che sopravvivono alla rigenerazione parametrica):
+Realizza il `relations[].type` del manifest come **joint relativo** (`add_joint`), NON come posizione
+assoluta. Crea ogni componente con `create_component` **all'origine del suo sketch**, poi àncoralo al
+target con `add_joint` che **referenzia geometria** stabile (facce/spigoli/punti nominati, che
+sopravvivono alla rigenerazione parametrica):
 
-| relation (manifest)        | joint / vincolo Fusion                                              |
+| relation (manifest)        | realizzazione faust-machines                                        |
 |----------------------------|---------------------------------------------------------------------|
-| `concentric_with` / coaxial| **Cylindrical** o **Rigid** joint su spigoli/assi concentrici       |
-| `on_top_of` / `flush_with` | **Planar** joint tra le facce a contatto (offset 0 = a filo)        |
-| `attached_to`              | **Rigid** joint con JointOrigin coincidenti                         |
-| `inside`                   | **concentric** + **planar** con offset per "sedere" dentro          |
-| `symmetric_to`             | **Mirror feature** sul piano di simmetria (o coppia simmetrica)     |
+| `concentric_with` / coaxial| `add_joint` tipo **cylindrical**/**rigid** su assi/spigoli concentrici |
+| `on_top_of` / `flush_with` | `add_joint` tipo **planar** tra le facce a contatto (offset 0 = a filo) |
+| `attached_to`              | `add_joint` tipo **rigid** su origini/geometrie coincidenti         |
+| `inside`                   | **concentric** + **planar** con offset (`add_joint`, due joint)     |
+| `symmetric_to`             | **`mirror`** (feature) sul piano di simmetria — non un joint        |
 
-**VIETATO**: impostare `occurrence.transform2` a una matrice mondo assoluta per "piazzare" una
-parte — bakera la posizione assoluta e vanifica la migrazione. Una trasformazione transitoria è
-ammessa **solo** come fallback ultimo ed **esplicitamente documentato** nelle `notes` del record.
+`create_as_built_joint` quando le parti sono già in posizione e vuoi "congelare" la relazione;
+`create_rigid_group` per gruppi rigidi. Firme dei riferimenti di `add_joint` *[da confermare sul Mac]*.
+
+**VIETATO**: usare `move_body` o una trasformazione assoluta per "piazzare" una parte — bakera la
+posizione e vanifica la migrazione. Una trasformazione transitoria è ammessa **solo** come fallback
+ultimo ed **esplicitamente documentato** nelle `notes` del record.
 
 ### Render di verifica (pose ESATTE delle viste di riferimento)
 
 Per restare apples-to-apples col gate, riproduci le **stesse pose** dei ref. Convenzione di build:
-**up = +Z, "fronte" rivolto verso −Y**. Dentro lo script, per ogni vista in `reference_views`:
+**up = +Z, "fronte" rivolto verso −Y**. Il render è l'**unico** uso ammesso di
+`mcp__fusion__execute_code`: dentro una chiamata `execute_code`, per ogni vista in `reference_views`
 imposta `app.activeViewport.camera` (`eye`/`target`/`upVector`; `cameraType` ortografica per
 front/right/back, isometrica fissa per three_quarter), `camera.isFitView = True` (o
 `viewport.fit()`), riassegna `viewport.camera = camera`, poi
@@ -274,11 +312,14 @@ in `src/fusion_build.py` `VIEW_CAMERA` (front=+Y, side=−X, back=−Y, three_qu
 ### Template prompt per l'executor (Sonnet)
 
 > Sei un executor specializzato in modellazione **PARAMETRICA** in Fusion 360 via MCP. Applichi
-> **un solo step** di un piano a un documento Fusion già avviato, eseguendo codice `adsk.*`
-> tramite `mcp__fusion__execute_fusion_code`. **Esattezza per costruzione**: sketch (vincolati e
-> quotati) → extrude/revolve, feature native (fillet/hole/shell/mirror), MAI mesh o editing
-> per-vertice. Il tuo focus è **geometria e simmetria** (forma, proporzioni, simmetria):
-> materiali e colori sono secondari e facoltativi — NON spendere tentativi per perfezionarli.
+> **un solo step** di un piano a un documento Fusion già avviato, orchestrando una **sequenza di tool
+> CAD granulari** `mcp__fusion__*` (una operazione per chiamata, in ordine). Usi
+> `mcp__fusion__execute_code` **SOLO** per il render di verifica (camera + `saveAsImageFile`).
+> **Esattezza per costruzione**: sketch (vincolati e quotati) → extrude/revolve, feature native
+> (fillet/hole/shell/mirror), MAI mesh o editing per-vertice. **NB**: le firme dei parametri dei tool
+> non sono documentate — fidati dello schema esposto dal server e, in caso di errore, leggi il
+> messaggio del tool e correggi. Il tuo focus è **geometria e simmetria** (forma, proporzioni,
+> simmetria): materiali e colori sono secondari — NON spendere tentativi per perfezionarli.
 >
 > PIANO COMPLETO (contesto): {plan.json}
 > STEP DA APPLICARE: {step}
@@ -289,36 +330,35 @@ in `src/fusion_build.py` `VIEW_CAMERA` (front=+Y, side=−X, back=−Y, three_qu
 >
 > VINCOLI HARD (non violarli):
 > - **Unità = cm** (1 mm = 0.1 cm). Quote tonde e proporzionali.
-> - **Una operazione logica per chiamata**, attesa; niente operazioni sovrapposte (crasha l'add-in).
-> - **Budget ~30s per chiamata**: se lo step è pesante, spezzalo in più script e fai snapshot.
-> - Per annullare: **riapri l'ultimo `.f3d` buono** (NON comandi di undo) o riporta indietro il
->   marker timeline e cancella le feature successive.
+> - **Una operazione per chiamata**, attesa; niente batch/operazioni sovrapposte (crasha l'add-in).
+> - **Budget ~30s per chiamata**: se lo step è pesante, spezzalo in più chiamate e fai snapshot.
+> - Per annullare: tool **`undo`** (rollback puntuale) oppure **riapri l'ultimo `.f3d` buono**.
+> - `execute_code` SOLO per il render di verifica; tutta la geometria via tool granulari.
 >
-> Procedura:
-> 1. Leggi lo stato: `app=adsk.core.Application.get(); design=app.activeProduct; root=design.rootComponent`.
-> 2. **Crea la parte come Component proprio** (per poterla jointare): sketch su piano/faccia,
->    **vincola e quota** lo sketch, poi **extrude** (cubo/plane) o **revolve** (cilindro/cono/
->    sfera/toro / solidi di rivoluzione). Per simmetria bilaterale usa la **Mirror feature** sul
->    piano di simmetria. Nomina i component/feature come da `target`/piano.
-> 3. **Posiziona con JOINTS** secondo `step.joints` e la mappa relazioni→joint: crea JointOrigin
->    su facce/spigoli/punti e un joint relativo (concentric/planar/rigid). **NON** usare
->    trasformazioni assolute (`transform2` matrice mondo) per piazzare la parte.
-> 4. **Dettagli** dello step → feature native: **Fillet** (raccordi), **Hole** (fori), revolve-cut
->    (scanalature), **Shell** (cavità). Niente boolean su mesh.
-> 5. Verifica: per ogni vista in `reference_views` imposta la camera con la posa canonica
->    (vedi `VIEW_CAMERA`: front=+Y, side=−X, back=−Y, three_quarter=iso; up=+Z), `viewport.fit()`,
+> Procedura (sequenza di chiamate granulari, una per volta):
+> 1. Leggi lo stato con `get_scene_info`; se serve, `set_design_type` → parametrico.
+> 2. **Crea la parte come Component proprio** (per poterla jointare): `create_component`, poi
+>    `create_sketch` su piano/faccia → `draw_*`/`create_polygon` → `add_constraint` + `add_dimension`
+>    (quote in cm), poi **`extrude`** (cubo/plane) o **`revolve`** (cilindro/cono/sfera/toro / solidi
+>    di rivoluzione). Per simmetria bilaterale usa **`mirror`** sul piano di simmetria. Nomina
+>    component/feature come da `target`/piano.
+> 3. **Posiziona con `add_joint`** secondo `step.joints` e la mappa relazioni→joint (referenzia
+>    geometria stabile: facce/spigoli/punti). **NON** usare `move_body`/trasformazioni assolute.
+> 4. **Dettagli** dello step → feature native: **`fillet`** (raccordi), **`create_hole`** (fori),
+>    extrude-cut (scanalature), **`shell`** (cavità), `boolean_operation` per join/cut. Niente mesh.
+> 5. Verifica (via `execute_code`): per ogni vista in `reference_views` imposta la camera con la posa
+>    canonica (`VIEW_CAMERA`: front=+Y, side=−X, back=−Y, three_quarter=iso; up=+Z), `viewport.fit()`,
 >    poi `app.activeViewport.saveAsImageFile(<png>, w, h)`. Apri il png con Read e giudica **forma
 >    e simmetria** (silhouette, proporzioni, simmetria) rispetto alla vista di riferimento e ad
 >    `acceptance` — NON il colore/materiale.
 > 6. RIPETI fino a un **massimo di 3 tentativi** finché il risultato non è soddisfacente
 >    (soddisfacente = silhouette/simmetria combaciano con le `reference_views` e `acceptance` è
->    rispettata). A ogni retry: ricarica l'ultimo `.f3d` buono o aggiusta i parametri (è
->    parametrico: cambia le quote dello sketch / dell'extrude), poi ri-verifica via render. Solo
->    dopo il 3° tentativo non soddisfacente → procedi col miglior tentativo e marca
+>    rispettata). A ogni retry: `undo` dell'ultima operazione, oppure ri-quota
+>    (`set_parameter`/`add_dimension`), oppure riapri l'ultimo `.f3d` buono; poi ri-verifica via
+>    render. Solo dopo il 3° tentativo non soddisfacente → procedi col miglior tentativo e marca
 >    `status: "failed"`.
-> 7. Su esito accettabile: **salva snapshot ed export** via codice — salva/esporta il design in
->    `<f3d>` (export manager, formato Fusion Archive `.f3d`) ed esporta la mesh STL in `<stl>`
->    (export manager STL del rootComponent/body). Salva il render di verifica in `<png>`.
+> 7. Su esito accettabile: **snapshot ed export** con i tool nativi — **`export_f3d`** → `<f3d>`
+>    (Fusion Archive) e **`export_stl`** → `<stl>`. Salva il render di verifica in `<png>`.
 >    Scrivi `<json>` con il record dello step.
 > 8. RITORNA (come testo finale = valore) SOLO questo JSON record:
 >    `{"id", "title", "status": "done|failed", "attempts": N, "f3d": "steps/step_NN.f3d",
@@ -328,13 +368,12 @@ in `src/fusion_build.py` `VIEW_CAMERA` (front=+Y, side=−X, back=−Y, three_qu
 
 ## 4. Chiusura
 
-Dopo l'ultimo step, esporta i file finali (un subagent o tu via MCP):
+Dopo l'ultimo step, esporta i file finali (un subagent o tu via MCP) con i **tool nativi**:
 ```
 uv run python -m src.fusion_build final-paths <build_dir>
 ```
-poi via `mcp__fusion__execute_fusion_code`: salva il design come `final.f3d` (export Fusion
-Archive), esporta **STEP** su `final.step` e **STL** su `final.stl` tramite l'export manager
-(`design.exportManager.createSTEPExportOptions(...)` / `createMeshExportOptions(...)` per STL).
+poi: **`export_f3d`** → `final.f3d`, **`export_step`** → `final.step`, **`export_stl`** →
+`final.stl`, ai path assoluti restituiti da `final-paths`.
 Infine:
 Export fatti, **NON** riassumere ancora: prosegui col **gate di convergenza (§5)**. Lo stato
 `done` lo imposta il gate (`record-eval`), non qui.
@@ -356,16 +395,20 @@ del manifest** + giudizio visivo per-vista, **focalizzato su geometria e simmetr
    ```
    → `{"iteration": N, "views": {front,three_quarter,side,back → png assoluti}, "verdict": "...abs..."}`
    (tutto sotto `eval/iter_NN/`).
-2. **Metriche oggettive in Fusion** (`execute_fusion_code`, numeri non occhio):
-   - bbox del modello: `body.boundingBox` / bbox del component (in **cm**) → ×10 = **mm** vs
-     `target_mm` (quote-target dal prompt/`strategy`, es. 89×130×3) → `proportion_error_pct`.
-   - **scarto di simmetria per asse**: misura lo scostamento rispetto al piano di simmetria
-     (bbox simmetrica o confronto specchiato) → `symmetry_dev_mm` per asse (in mm).
-   - `watertight`: esporta STL e verificalo con trimesh (come blender-build) e/o riporta la
-     validità del solido B-rep (`body.isSolid`).
-3. **Render pulito delle 4 viste** del modello: pose canoniche `VIEW_CAMERA` (front=+Y, side=−X,
-   back=−Y, three_quarter=iso; up=+Z), ortografica per front/right/back, `viewport.fit()`, poi
-   `saveAsImageFile` salvando in `views[...]` di `eval-paths`. **Stesse pose** usate negli step.
+2. **Metriche oggettive in Fusion** (numeri, non occhio):
+   - bbox del modello: **SOLO via `execute_code`** (`body.boundingBox` / bbox del component, in
+     **cm**) → ×10 = **mm** vs `target_mm` (quote-target dal prompt/`strategy`, es. 89×130×3) →
+     `proportion_error_pct`. Nessun tool granulare espone la bbox (`get_physical_properties` dà
+     massa/volume/centro di massa, NON la bbox).
+   - **scarto di simmetria per asse**: scostamento rispetto al piano di simmetria (bbox specchiata,
+     via `execute_code`) → `symmetry_dev_mm` per asse (in mm); usa **`get_physical_properties`**
+     (centro di massa) come supporto e `measure_distance` per check puntuali.
+   - `watertight`: esporta STL (`export_stl`) e verificalo con trimesh (come blender-build) e/o
+     riporta la validità del solido B-rep (`body.isSolid`, via `execute_code`).
+3. **Render pulito delle 4 viste** del modello (via `execute_code`): pose canoniche `VIEW_CAMERA`
+   (front=+Y, side=−X, back=−Y, three_quarter=iso; up=+Z), ortografica per front/right/back,
+   `viewport.fit()`, poi `saveAsImageFile` salvando in `views[...]` di `eval-paths`. **Stesse pose**
+   usate negli step.
 4. **Giudizio visivo per-vista + copertura manifest** — lancia **un** subagent giudice (Sonnet)
    col **template giudice** sotto, passandogli anche `manifest.json`: per ogni vista confronta il
    render con `refs/<view>.png` su **silhouette/forma/proporzioni/simmetria** (NON colore) →
@@ -438,7 +481,9 @@ verdict).
 
 Poi esegui la pipeline normale (§2–§5) con due differenze (il manifest è già pronto, salti §1):
 - Il **piano è di rifinitura**: lo **step 1 NON crea geometria nuova** ma carica il modello —
-  apri `<seed.f3d assoluto>` come documento attivo (import del Fusion Archive) — e gli step
+  apri `<seed.f3d assoluto>` come documento attivo. faust-machines non risulta avere un tool
+  granulare di apertura: usa `execute_code` (`app.documents.open(...)` / import del Fusion Archive)
+  *[da verificare sul Mac; se emergesse un tool nativo di apertura, preferiscilo]*. Gli step
   successivi **mirano ai `planning_hints`** (i gap da chiudere), restando su geometria/simmetria
   e sulle parti del manifest ancora carenti. Essendo parametrico, spesso basta **modificare le
   quote di sketch/feature** esistenti invece di ricostruire.
@@ -449,18 +494,24 @@ A fine pipeline gira un nuovo gate (§5); le iterazioni restano tracciate in met
 
 ## Toolbox parametrico Fusion (preferenze — privilegiare SEMPRE l'esatto per costruzione)
 
-- **Sketch + vincoli/quote**: profili 2D su un piano/faccia, **fully-constrained** (vincoli
-  geometrici + dimensionali). La forma nasce qui, esatta.
-- **Feature di volume**: **Extrude** (cubo/plane/profili estrusi), **Revolve** (cilindro/cono/
-  sfera/toro e ogni solido di rivoluzione: corpo teiera, bottiglia, coperchio), **Loft**, **Sweep**.
-- **Feature di modifica**: **Shell** (cavità a parete sottile), **Fillet** (raccordi),
-  **Chamfer** (smussi), **Hole** (fori, native, con tipo/diametro), **Thread**, **Draft**.
-- **Pattern/simmetria**: **Mirror** feature sul piano di simmetria (**default** per oggetti
-  simmetrici — analogo del MIRROR di Blender), **Circular/Rectangular Pattern**.
-- **Assieme**: ogni parte = un **Component**; posiziona con **Joints** (Rigid/Cylindrical/Planar/
-  Revolute) e **JointOrigin** su geometria nominata. Relazioni del manifest → joints (vedi §3).
-- **VIETATO** (salvo banalità): mesh / editing per-vertice; **trasformazioni assolute** per
-  posizionare le parti (usa joints); boolean "sporchi" su mesh.
+- **Sketch + vincoli/quote** → `create_sketch`, `draw_rectangle`/`draw_circle`/`draw_line`/
+  `draw_arc`/`draw_spline`/`create_polygon`, `add_constraint`, `add_dimension`, `offset_curve`,
+  `trim_curve`, `project_geometry`. **Fully-constrained**: la forma nasce qui, esatta.
+- **Feature di volume** → `extrude`, `revolve` (cilindro/cono/sfera/toro e solidi di rivoluzione),
+  `loft`, `sweep` (+ primitive dirette `create_box`/`create_cylinder`/`create_sphere`/`create_torus`
+  solo per casi banali).
+- **Feature di modifica** → `shell`, `fillet`, `chamfer`, `create_hole`, `create_thread`,
+  `draft_faces`, `split_body`, `scale_body`, `boolean_operation`.
+- **Pattern/simmetria** → `mirror` (**default** per oggetti simmetrici — analogo del MIRROR di
+  Blender), `circular_pattern`, `rectangular_pattern`.
+- **Assieme** → ogni parte = un **Component** (`create_component`); posiziona con `add_joint`
+  (rigid/cylindrical/planar/revolute), `create_as_built_joint`, `create_rigid_group`; piani/assi di
+  costruzione `create_construction_plane`/`create_construction_axis`. Relazioni del manifest →
+  joints (vedi §3).
+- **Parametri** → `get_parameters`, `create_parameter`, `set_parameter`.
+- **Export** → `export_f3d`, `export_step`, `export_stl`.
+- **VIETATO** (salvo banalità): mesh / editing per-vertice; **`move_body`/trasformazioni assolute**
+  per posizionare le parti (usa joints); boolean "sporchi" su mesh.
 
 ## Gotcha / principi (applicarli SEMPRE)
 
@@ -480,10 +531,19 @@ aggiornare l'auto-memory fuori repo: la fonte canonica è il file in `run/`.
   cm→mm. Niente frazioni arbitrarie.
 - **Una operazione per chiamata, ~30s di budget**: spezza gli step pesanti, fai snapshot
   `.f3d` tra l'uno e l'altro; mai operazioni sovrapposte.
-- **Annullare = riaprire l'ultimo `.f3d`** (o rollback del marker timeline + cancella le
-  feature successive): non affidarti a comandi di undo programmatici.
-- **Riferimenti stabili**: per joints/feature usa JointOrigin / piani-feature / facce nominate,
-  non indici di facce volatili che cambiano alla rigenerazione.
+- **Annullare**: tool **`undo`** per rollback puntuale dell'ultima operazione; per scartare più
+  operazioni, **riapri l'ultimo `.f3d` buono**.
+- **Porta 9876 condivisa con blender-mcp**: l'add-in Fusion ascolta su `localhost:9876`, **la
+  stessa porta** del bridge di blender-mcp. Se Blender e Fusion (coi rispettivi add-in MCP) sono
+  attivi insieme c'è **conflitto di porta** → uno dei due bridge non parte. Regola: non tenere i
+  due add-in attivi simultaneamente (chiudi/disattiva quello non in uso). *[Verificare se
+  faust-machines consente di cambiare porta]*.
+- **Render+bbox solo via `execute_code`**: il server non ha tool di screenshot né di bbox; usa
+  `execute_code` SOLO per quello, mai per costruire geometria.
+- **Firme dei tool non documentate**: alla prima chiamata di un tool nuovo affidati allo schema
+  esposto dal server e, se erra, leggi il messaggio del tool e correggi.
+- **Riferimenti stabili**: per joints/feature usa geometria nominata (piani-feature / facce /
+  spigoli), non indici di facce volatili che cambiano alla rigenerazione.
 - **Diagnostica**: rendi le 4 pose canoniche (front/side/back ortografiche + 3/4 iso),
   `viewport.fit()`, e itera i parametri GUARDANDO i render salvati con `saveAsImageFile`.
 - **Focus = geometria e simmetria, non materiali/colori.** Spendi i tentativi su silhouette,
@@ -492,8 +552,9 @@ aggiornare l'auto-memory fuori repo: la fonte canonica è il file in `run/`.
 ## Note operative
 
 - Esecuzione **dentro Claude Code**, niente app web. Nessuna chiamata Meshy/SCAD.
-- **Fusion gira solo su macOS/Windows.** Setup add-in + MCP e checklist di verifica lato Mac:
-  vedi **`SETUP_MACOS.md`** (in questa cartella skill).
+- **Fusion gira solo su macOS/Windows.** Setup add-in + MCP (server faust-machines, add-in
+  `Fusion360MCP`, porta 9876, regola costruzione-granulare / render-bbox via `execute_code`): vedi
+  la sezione `fusion-build` in **`run/README.md`**.
 - **Due contesti (DEV vs RUN)** — vedi `run/README.md`. La skill vive SOLO in
   `run/.claude/skills/`: i *run* della pipeline si lanciano da `run/` (ha il MCP `fusion` e
   i `src/` in sola lettura), lo *sviluppo* di `src/`+skill si fa da repo root (senza MCP CAD).

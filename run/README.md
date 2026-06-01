@@ -47,11 +47,22 @@ sketch→extrude/revolve, relazioni realizzate come **joints**, non trasformazio
 (in `run/.mcp.json`, abilitato in `run/.claude/settings.json`).
 
 ⚠️ Fusion gira solo su **macOS/Windows**: l'add-in, il bridge MCP e qualunque run reale **non
-sono eseguibili né verificabili su Linux**. Setup add-in + MCP e la **checklist di verifica lato
-Mac** sono in `run/.claude/skills/fusion-build/SETUP_MACOS.md`. Il placeholder MCP nel repo
-(`uvx fusion360-mcp-server`) e il nome tool `mcp__fusion__execute_fusion_code` vanno **confermati
-e, se serve, corretti sul Mac** in base al server scelto. Le lezioni Fusion stanno in
-`run/fusion_build_lessons.md`.
+sono eseguibili né verificabili su Linux**.
+
+**Setup MCP (Mac):** il server è **faust-machines/fusion360-mcp-server** (stdio,
+`uvx fusion360-mcp-server --mode socket`, bridge add-in su TCP **9876**).
+1. Installa l'add-in (`./scripts/install-addon.sh` del repo del server, o copia manuale in
+   `~/Library/Application Support/Autodesk/Autodesk Fusion 360/API/AddIns/Fusion360MCP`).
+2. In Fusion: **Shift+S → Add-Ins → Fusion360MCP → Run**; il log `~/fusion360mcp.log` deve mostrare
+   `"[MCP] Server listening on localhost:9876"`.
+3. `run/.mcp.json` ha già `fusion` stdio e `settings.json` i permessi; **riavvia Claude da `run/`**.
+
+La costruzione usa i **tool CAD granulari** (`mcp__fusion__create_sketch`, `extrude`, `revolve`,
+`add_joint`, `export_*`…); `mcp__fusion__execute_code` serve **solo** per render viste e lettura
+bbox (il server non ha tool di screenshot/bbox). ⚠️ Le firme dei tool **non sono documentate**:
+introspezionale sul Mac (lista tool + schema) e annota in `run/fusion_build_lessons.md`. Attenzione
+al **conflitto porta 9876 con blender-mcp** (non tenere i due add-in attivi insieme). Le lezioni
+Fusion stanno in `run/fusion_build_lessons.md`.
 
 ## Note
 

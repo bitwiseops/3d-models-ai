@@ -10,7 +10,7 @@ durante una run emerge un nuovo problema/soluzione, **aggiungilo qui** e committ
 > Linux (dove Fusion non gira); la **prima run end-to-end sul Mac** è avvenuta il 2026-05-31 — vedi
 > la sezione **"✅ Validato su Fusion reale"** in fondo per i gotcha confermati/nuovi. Le voci
 > ancora marcate `[da confermare]` non sono state verificate in prima persona; togli il marcatore
-> quando le vedi funzionare. Setup: `run/.claude/skills/fusion-build/SETUP_MACOS.md`.
+> quando le vedi funzionare. Setup MCP: sezione `fusion-build` in `run/README.md`.
 
 Valgono per qualunque ricostruzione procedurale parametrica in Fusion guidata da MCP.
 
