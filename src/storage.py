@@ -1,9 +1,11 @@
+import io
 import json
 import os
 import re
 import shutil
 import threading
 import unicodedata
+import zipfile
 from datetime import datetime
 from pathlib import Path
 
@@ -238,6 +240,84 @@ def load_components_manifest(session: Path) -> dict:
             f"Nessun components.json in {session}: lancia prima `breakdown`."
         )
     return json.loads(path.read_text(encoding="utf-8"))
+
+
+def collect_components_bundle(session: Path) -> list[tuple[Path, str]]:
+    """Raccoglie i file dell'handoff componenti — gli UNICI input che servono
+    alla skill PC `fusion-build-from-components`: `components/components.json` +
+    tutte le immagini referenziate (le 4 viste whole + le 4 viste di ogni
+    componente) + `metadata.json` per provenienza.
+
+    Ritorna una lista di `(path_assoluto, arcname)` con l'**arcname relativo alla
+    session dir** così la struttura (`components/...`, `images/...`) resta intatta
+    e, una volta scompattata sul PC, `load_components_inputs` risolve i path
+    relativi senza modifiche. Valida che ogni referenziato esista (FileNotFoundError
+    altrimenti): il bundle non è MAI parziale.
+    """
+    manifest = load_components_manifest(session)  # FileNotFoundError se manca
+    session = session.resolve()
+    members: list[tuple[Path, str]] = []
+    seen: set[str] = set()
+
+    def add(rel: str, *, required: bool = True) -> None:
+        rel = str(rel).replace("\\", "/").lstrip("/")
+        if not rel or rel in seen:
+            return
+        p = (session / rel).resolve()
+        try:
+            p.relative_to(session)
+        except ValueError:
+            raise ValueError(f"path fuori dalla session nel manifest: {rel}")
+        if not p.exists():
+            if required:
+                raise FileNotFoundError(
+                    f"file referenziato mancante nel bundle: {rel} "
+                    "(rigenera il componente prima di esportare)."
+                )
+            return
+        seen.add(rel)
+        members.append((p, rel))
+
+    add("components/components.json")
+    for rel in (manifest.get("design_views") or {}).values():
+        add(rel)
+    for c in manifest.get("components") or []:
+        for rel in (c.get("views") or {}).values():
+            add(rel)
+    add("metadata.json", required=False)
+    return members
+
+
+def write_components_bundle(session: Path) -> bytes:
+    """Serializza il bundle componenti (vedi collect_components_bundle) in un
+    archivio .zip in memoria. Usato sia dall'endpoint web sia dai test."""
+    members = collect_components_bundle(session)
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w", compression=zipfile.ZIP_DEFLATED) as zf:
+        for abs_path, arcname in members:
+            zf.write(abs_path, arcname=arcname)
+    return buf.getvalue()
+
+
+def extract_components_bundle(data: bytes, dest: Path, *, force: bool = False) -> Path:
+    """Scompatta un bundle componenti (.zip prodotto da write_components_bundle)
+    in `dest` (la nuova session dir locale). Guard anti path-traversal sugli
+    arcname. Rifiuta una dest non vuota salvo `force`. Verifica che dopo
+    l'estrazione esista `components/components.json`. Ritorna `dest`.
+    """
+    if dest.exists() and any(dest.iterdir()) and not force:
+        raise FileExistsError(
+            f"{dest} esiste già e non è vuota: usa --force per sovrascrivere."
+        )
+    with zipfile.ZipFile(io.BytesIO(data)) as zf:
+        for name in zf.namelist():
+            if name.startswith("/") or ".." in Path(name).parts:
+                raise ValueError(f"arcname non sicuro nel bundle: {name}")
+        dest.mkdir(parents=True, exist_ok=True)
+        zf.extractall(dest)
+    if not (dest / "components" / "components.json").exists():
+        raise ValueError("bundle non valido: manca components/components.json")
+    return dest
 
 
 def cleanup_session(session: Path, *, apply: bool = False) -> dict:

@@ -10,6 +10,15 @@
   </ul>
 </details>
 {% endif %}
+<div class="flex items-center justify-between mb-3">
+  <span class="text-xs text-stone-500 dark:text-stone-400">
+    {{ manifest.components | length }} componenti{% if manifest.components and manifest.components | selectattr("approved") | list | length == manifest.components | length %} · tutti approvati{% endif %}
+  </span>
+  <a href="{{ root_path }}/sessions/{{ session_id }}/bundle.zip" download
+     class="text-xs font-medium px-3 py-1.5 rounded-lg border border-stone-300 dark:border-stone-700 text-stone-700 dark:text-stone-200 hover:bg-stone-100 dark:hover:bg-stone-800">
+    ⬇ Scarica bundle (.zip)
+  </a>
+</div>
 <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
   {% for comp in manifest.components %}
   {% include "_component_card.html" %}

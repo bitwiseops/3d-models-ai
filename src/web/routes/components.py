@@ -10,7 +10,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from fastapi import APIRouter, Depends, Form, HTTPException, Request
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, Response
 
 from ... import storage, workflow
 from ..deps import get_job_manager, resolve_session
@@ -78,6 +78,28 @@ async def get_components(
             "session_id": session_id,
             "manifest": manifest,
             "active_job": active_job.snapshot() if active_job else None,
+        },
+    )
+
+
+@router.get("/bundle.zip")
+async def download_components_bundle(
+    session_id: str,
+    session: Path = Depends(resolve_session),
+) -> Response:
+    """Pacchetto .zip con gli input dell'handoff componenti (components.json + le
+    viste whole/per-componente). È ciò che la skill PC `fusion-build-from-components`
+    consuma: scaricalo dal server remoto e ricostruiscilo in locale con
+    `uv run python -m src.main pull <session> --from <url>`."""
+    try:
+        data = storage.write_components_bundle(session)
+    except FileNotFoundError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    return Response(
+        content=data,
+        media_type="application/zip",
+        headers={
+            "Content-Disposition": f'attachment; filename="{session_id}-components.zip"',
         },
     )
 
