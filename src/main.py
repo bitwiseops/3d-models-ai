@@ -5,6 +5,10 @@ from pathlib import Path
 
 from . import config, mesh_repair, storage, workflow
 
+# Base URL di default per `pull` (il dominio ngrok statico assegnato). Override
+# con --from o con la env MODELS3D_PULL_BASE.
+DEFAULT_PULL_BASE = "https://unbribed-liv-empirical.ngrok-free.dev"
+
 
 def _ensure_keys() -> None:
     try:
@@ -179,6 +183,71 @@ def cmd_cleanup(args) -> int:
     return 0
 
 
+def _bundle_url_and_id(arg: str, base: str | None) -> tuple[str, str]:
+    """Risolve (url_bundle, session_id_locale) dall'argomento di `pull`.
+    Accetta: un id sessione (+ --from BASE), un URL di sessione (.../sessions/<id>)
+    o un URL diretto a `.../bundle.zip`."""
+    from urllib.parse import urlparse
+
+    if arg.startswith(("http://", "https://")):
+        u = arg.rstrip("/")
+        if u.endswith(".zip"):
+            parts = urlparse(u).path.rstrip("/").split("/")
+            # .../sessions/<id>/bundle.zip → l'id è il penultimo segmento
+            sid = parts[-2] if len(parts) >= 2 else "bundle"
+            return u, sid
+        sid = urlparse(u).path.rstrip("/").split("/")[-1]
+        return f"{u}/bundle.zip", sid
+    if not base:
+        raise ValueError(
+            "passa un URL completo, oppure l'id sessione insieme a --from BASE_URL."
+        )
+    sid = arg.strip("/")
+    if not sid:
+        raise ValueError("id sessione vuoto.")
+    return f"{base.rstrip('/')}/sessions/{sid}/bundle.zip", sid
+
+
+def cmd_pull(args) -> int:
+    """Scarica da un server remoto il bundle componenti di una sessione e lo
+    ricostruisce in outputs/<id> in locale, pronto per la skill PC
+    fusion-build-from-components."""
+    import requests
+
+    try:
+        url, sid = _bundle_url_and_id(args.session, args.from_url)
+    except ValueError as e:
+        print(f"Errore: {e}", file=sys.stderr)
+        return 2
+
+    # Header innocuo per server normali: salta l'interstitial HTML del free tier
+    # ngrok, che altrimenti arriverebbe al posto dello zip e farebbe fallire l'estrazione.
+    headers = {"ngrok-skip-browser-warning": "1"}
+    token = args.token or os.environ.get("MODELS3D_PULL_TOKEN")
+    if token:
+        headers["Authorization"] = f"Bearer {token}"
+
+    print(f"→ Scarico bundle da {url}")
+    try:
+        resp = requests.get(url, headers=headers, timeout=60)
+        resp.raise_for_status()
+    except requests.RequestException as e:
+        print(f"Errore download: {e}", file=sys.stderr)
+        return 1
+
+    dest = (Path(args.out) if args.out else config.OUTPUTS_ROOT) / sid
+    try:
+        storage.extract_components_bundle(resp.content, dest, force=args.force)
+    except (FileExistsError, ValueError) as e:
+        print(f"Errore: {e}", file=sys.stderr)
+        return 1
+
+    print(f"\nPULLED={dest}")
+    print("Lancia la skill su questa sessione, es.:")
+    print(f"    /fusion-build-from-components {dest}")
+    return 0
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(
         description="Workflow Meshy + Claude per generare modelli 3D."
@@ -305,6 +374,38 @@ def main() -> int:
         help="Cancella davvero i file (senza, è solo un'anteprima dry-run).",
     )
     p_cleanup.set_defaults(func=cmd_cleanup)
+
+    p_pull = sub.add_parser(
+        "pull",
+        help="Scarica da un server remoto il bundle componenti di una sessione "
+        "(components.json + viste whole/per-componente) e lo ricostruisce in "
+        "outputs/<id> in locale, pronto per la skill fusion-build-from-components.",
+    )
+    p_pull.add_argument(
+        "session",
+        help="id sessione (con --from) oppure URL completo (di sessione o di bundle.zip).",
+    )
+    p_pull.add_argument(
+        "--from",
+        dest="from_url",
+        default=os.environ.get("MODELS3D_PULL_BASE", DEFAULT_PULL_BASE),
+        help=f"Base URL del server (default: {DEFAULT_PULL_BASE}, "
+        "override con env MODELS3D_PULL_BASE).",
+    )
+    p_pull.add_argument(
+        "--token",
+        help="Bearer token se il server è protetto (o env MODELS3D_PULL_TOKEN).",
+    )
+    p_pull.add_argument(
+        "--out",
+        help="Root di destinazione (default: outputs/).",
+    )
+    p_pull.add_argument(
+        "--force",
+        action="store_true",
+        help="Sovrascrive la session dir locale se già esistente e non vuota.",
+    )
+    p_pull.set_defaults(func=cmd_pull)
 
     parser.add_argument(
         "idea_positional",

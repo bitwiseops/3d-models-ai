@@ -214,3 +214,82 @@ def test_no_3d_in_objects(client: TestClient, monkeypatch) -> None:
     # rotta A/B rimossa
     r = client.get(f"/sessions/{sid}/ab")
     assert r.status_code == 404
+
+
+def test_bundle_endpoint_roundtrip(
+    client: TestClient, tmp_outputs: Path, monkeypatch
+) -> None:
+    """L'endpoint bundle.zip impacchetta l'handoff (components.json + viste) e,
+    una volta scompattato altrove, load_components_inputs risolve tutto: prova
+    server→PC end-to-end."""
+    import io
+    import zipfile
+
+    from src.fusion_build_from_components import load_components_inputs
+
+    _mock_generation(monkeypatch)
+    session = _accepted_session("teiera bundle")
+    sid = session.name
+    workflow.breakdown_into_components(session)
+
+    # collect: components.json + immagini, arcname relativi alla session, esistenti
+    members = storage.collect_components_bundle(session)
+    arcs = {arc for _, arc in members}
+    assert "components/components.json" in arcs
+    assert any(a.endswith(".png") for a in arcs)
+    assert all(p.exists() for p, _ in members)
+    assert all(not a.startswith("/") and ".." not in a for a in arcs)
+
+    # endpoint → zip
+    r = client.get(f"/sessions/{sid}/bundle.zip")
+    assert r.status_code == 200
+    assert r.headers["content-type"] == "application/zip"
+    zf = zipfile.ZipFile(io.BytesIO(r.content))
+    assert "components/components.json" in set(zf.namelist())
+
+    # round-trip: estrai in un root diverso e risolvi come fa la skill PC
+    dest = tmp_outputs / "_pulled" / sid
+    storage.extract_components_bundle(r.content, dest)
+    src = load_components_inputs(dest)
+    assert src["components"]
+    assert all(p.exists() for p in src["design_views"].values())
+    for c in src["components"]:
+        assert all(p.exists() for p in c["_view_paths"].values())
+
+
+def test_bundle_endpoint_404_without_components(
+    client: TestClient, monkeypatch
+) -> None:
+    session = _accepted_session("teiera nuda")
+    r = client.get(f"/sessions/{session.name}/bundle.zip")
+    assert r.status_code == 404
+
+
+def test_bundle_url_and_id() -> None:
+    from src.main import _bundle_url_and_id
+
+    assert _bundle_url_and_id("ses-1", "http://h:8000") == (
+        "http://h:8000/sessions/ses-1/bundle.zip",
+        "ses-1",
+    )
+    assert _bundle_url_and_id("https://h/x/sessions/abc", None) == (
+        "https://h/x/sessions/abc/bundle.zip",
+        "abc",
+    )
+    assert _bundle_url_and_id("https://h/sessions/abc/bundle.zip", None) == (
+        "https://h/sessions/abc/bundle.zip",
+        "abc",
+    )
+    with pytest.raises(ValueError):
+        _bundle_url_and_id("bare-id", None)
+
+
+def test_extract_bundle_rejects_traversal(tmp_path: Path) -> None:
+    import io
+    import zipfile
+
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w") as zf:
+        zf.writestr("../evil.txt", "x")
+    with pytest.raises(ValueError):
+        storage.extract_components_bundle(buf.getvalue(), tmp_path / "d")

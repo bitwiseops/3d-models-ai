@@ -30,6 +30,13 @@ ha `components/components.json`, **fermati** e di' all'utente di lanciare prima 
 (CLI: `uv run python -m src.main breakdown <session>`, oppure il bottone "Scomponi in componenti"
 nella web UI).
 
+> **Sessione generata su un server remoto.** Se il `breakdown` è girato sull'app web remota, la
+> session dir non è sul PC con Fusion. Tirala giù **prima** col bundle dell'handoff: in web, bottone
+> "⬇ Scarica bundle (.zip)" nella sezione componenti (endpoint `GET /sessions/<id>/bundle.zip`);
+> oppure da CLI `uv run python -m src.main pull <id> --from <url-server>` (token via `--token` o env
+> `MODELS3D_PULL_TOKEN`), che ricostruisce `outputs/<id>/` in locale e stampa il path da passare a
+> questa skill. Il bundle contiene solo gli input utili: `components.json` + viste whole/per-componente.
+
 > **Modello a tool granulari + eccezione `execute_code`** — identico a fusion-build. Il server
 > `fusion` espone i tool CAD granulari `mcp__fusion__*` (`create_sketch`, `draw_*`, `add_constraint`,
 > `add_dimension`, `extrude`, `revolve`, `fillet`, `shell`, `mirror`, `create_hole`,
