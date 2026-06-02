@@ -5,6 +5,10 @@ from pathlib import Path
 
 from . import config, mesh_repair, storage, workflow
 
+# Base URL di default per `pull` (il dominio ngrok statico assegnato). Override
+# con --from o con la env MODELS3D_PULL_BASE.
+DEFAULT_PULL_BASE = "https://unbribed-liv-empirical.ngrok-free.dev"
+
 
 def _ensure_keys() -> None:
     try:
@@ -216,7 +220,9 @@ def cmd_pull(args) -> int:
         print(f"Errore: {e}", file=sys.stderr)
         return 2
 
-    headers = {}
+    # Header innocuo per server normali: salta l'interstitial HTML del free tier
+    # ngrok, che altrimenti arriverebbe al posto dello zip e farebbe fallire l'estrazione.
+    headers = {"ngrok-skip-browser-warning": "1"}
     token = args.token or os.environ.get("MODELS3D_PULL_TOKEN")
     if token:
         headers["Authorization"] = f"Bearer {token}"
@@ -382,7 +388,9 @@ def main() -> int:
     p_pull.add_argument(
         "--from",
         dest="from_url",
-        help="Base URL del server, es. https://server.example:8000.",
+        default=os.environ.get("MODELS3D_PULL_BASE", DEFAULT_PULL_BASE),
+        help=f"Base URL del server (default: {DEFAULT_PULL_BASE}, "
+        "override con env MODELS3D_PULL_BASE).",
     )
     p_pull.add_argument(
         "--token",
