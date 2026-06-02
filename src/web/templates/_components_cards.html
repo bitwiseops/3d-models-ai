@@ -1,0 +1,18 @@
+{# Griglia delle card dei componenti. Caricato via HTMX in #components-cards. #}
+{% if not manifest %}
+<p class="text-sm text-stone-500 dark:text-stone-400">Nessun componente.</p>
+{% else %}
+{% if manifest.open_questions %}
+<details class="text-xs text-amber-700 dark:text-amber-300 bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-900 rounded-lg p-3 mb-3">
+  <summary class="cursor-pointer font-medium">domande aperte ({{ manifest.open_questions | length }})</summary>
+  <ul class="mt-2 list-disc list-inside space-y-1">
+    {% for q in manifest.open_questions %}<li>{{ q }}</li>{% endfor %}
+  </ul>
+</details>
+{% endif %}
+<div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+  {% for comp in manifest.components %}
+  {% include "_component_card.html" %}
+  {% endfor %}
+</div>
+{% endif %}

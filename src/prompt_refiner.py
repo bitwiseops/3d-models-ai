@@ -1,4 +1,6 @@
 import base64
+import json
+import re
 from pathlib import Path
 
 from anthropic import Anthropic
@@ -432,6 +434,194 @@ def refine_with_feedback(
         max_tokens=1024,
         system=OBJECT_GRID_SYSTEM_PROMPT,
         messages=messages,
+    )
+    usage.record_response("oggetti", resp)
+    return _compose_object_prompt(resp.content[0].text)
+
+
+# --- Scomposizione in componenti -------------------------------------------
+# Dopo l'accettazione del design whole-object, l'oggetto viene scomposto nei
+# pezzi che un maker modellerebbe/assemblerebbe separatamente. Due stadi Claude:
+#  1) proposer: dato il subject + l'immagine del design, propone l'inventario dei
+#     componenti (JSON), con relazioni di accoppiamento tra loro;
+#  2) refiner per-pezzo: per ogni componente produce un prompt Meshy COMPLETO
+#     (subject + staging 2x2), così l'immagine di ciascun componente è una grid
+#     a 4 viste riutilizzabile dal parser a valle (skill fusion-build-from-components).
+# Il vocabolario delle relazioni è IDENTICO al PART-MANIFEST della pipeline Fusion
+# (attached_to / on_top_of / inside / concentric_with / flush_with / symmetric_to),
+# così il mapping componenti→manifest a valle è quasi meccanico.
+
+COMPONENT_PROPOSER_SYSTEM_PROMPT = """Sei un ingegnere di prodotto che scompone un oggetto in COMPONENTI fisici stampabili e assemblabili separatamente, per una pipeline di modellazione CAD parametrica (Fusion 360).
+
+CONTESTO
+Ricevi la descrizione di un oggetto (subject) e la sua immagine di design (una grid 2x2 con 4 viste: front / three-quarter / side / back). Devi identificare i PEZZI distinti che lo compongono: parti che, in una costruzione CAD reale, verrebbero modellate come corpi/componenti separati e poi assemblate con vincoli (joints).
+
+COSA È UN COMPONENTE
+- Un volume coeso, funzionalmente o geometricamente distinto (es. corpo, coperchio, manico, beccuccio, base, tappo, ghiera, perno).
+- NON un dettaglio di superficie (scanalatura, smusso, filetto, testo in rilievo): quelli restano feature del componente che li porta, NON componenti a sé.
+- Privilegia una scomposizione "da maker": 2-8 componenti per un oggetto tipico. Se l'oggetto è chiaramente MONOLITICO (un blocco unico senza pezzi separabili), ritorna UN SOLO componente che rappresenta l'intero oggetto.
+
+RELAZIONI DI ACCOPPIAMENTO (come i pezzi si montano tra loro)
+Usa SOLO questi tipi di relazione (lo stesso vocabolario del manifest CAD a valle):
+- attached_to: fissato rigidamente a un altro pezzo
+- on_top_of: poggiato/montato sopra
+- inside: contenuto dentro
+- concentric_with: coassiale (stesso asse di rivoluzione)
+- flush_with: a filo con una faccia/superficie
+- symmetric_to: speculare rispetto a un altro pezzo
+Per ogni relazione indica `target_id` (l'id di un altro componente) e `detail` (breve, in italiano o inglese: come/dove avviene l'accoppiamento).
+
+INTERFACCIA
+Per ogni componente descrivi l'`interface`: la geometria con cui si accoppia agli altri (es. "apertura superiore ~Ø40mm che riceve la flangia del coperchio", "perno cilindrico che entra nel foro della base", "faccia piana inferiore a filo col corpo"). Questa geometria DEVE poi essere ritratta nell'immagine del componente, perché a valle serve per creare il joint.
+
+OUTPUT (SOLO JSON, nessun testo attorno, nessun markdown)
+{
+  "components": [
+    {
+      "id": "<slug-univoco-minuscolo>",
+      "name": "<nome breve leggibile>",
+      "description": "<descrizione fisica/geometrica del pezzo isolato>",
+      "relations": [{"type": "<uno dei tipi sopra>", "target_id": "<id altro componente>", "detail": "<come si accoppia>"}],
+      "relative_scale": "<scala relativa all'intero, es. '~70% dell'altezza totale'>",
+      "interface": "<geometria di accoppiamento>"
+    }
+  ],
+  "open_questions": ["<ambiguità non risolvibili dall'immagine>"]
+}
+
+REGOLE
+- Gli `id` sono slug univoci in minuscolo (es. "body", "lid", "handle", "spout").
+- `target_id` deve riferirsi a un altro `id` presente nella lista.
+- Le relazioni vanno dichiarate almeno una volta per ogni coppia di pezzi che si toccano (basta da un lato).
+- Rispondi SOLO con il JSON valido."""
+
+
+COMPONENT_REFINER_SYSTEM_PROMPT = """Sei un prompt-engineer specializzato nella DESCRIZIONE DEL SOGGETTO per immagini blueprint image-to-3D, qui applicato a UN SINGOLO COMPONENTE di un oggetto più grande.
+
+CONTESTO PIPELINE (non scrivere nulla a riguardo)
+Il tuo output verrà concatenato DOPO un blocco "staging" fisso che già definisce: layout 2x2 grid, 4 angoli di camera (front / three-quarter / side / back), studio neutro, lighting, lens, esclusioni di DOF / bokeh / ombre dure, etc. Quindi NON descrivere layout, griglia, camera, lighting, sfondo, lens, esposizione: sono GIÀ specificati. Limitati al SOGGETTO, che qui è il SINGOLO componente isolato.
+
+COSA DEVI SCRIVERE
+Una descrizione fisica densa e tangibile del SOLO componente indicato, come apparirebbe ISOLATO sul tavolo dello studio (staccato dal resto dell'oggetto), focalizzata su:
+- Forma generale e silhouette del pezzo.
+- Proporzioni e rapporti dimensionali concreti, COERENTI con la scala del pezzo nell'oggetto intero e con i pezzi fratelli.
+- Dettagli geometrici distintivi (curvature, smussi, spigoli, scanalature, fori funzionali propri del pezzo).
+- LA GEOMETRIA DELL'INTERFACCIA DI ACCOPPIAMENTO in modo esplicito (il foro, il perno, la flangia, il filetto, la faccia piana di contatto con cui si monta agli altri pezzi): questa geometria DEVE essere visibile e descritta, perché a valle serve per assemblare i pezzi con vincoli CAD.
+- Materiali e finitura COERENTI con l'intero oggetto e i fratelli (stesso materiale/colore salvo che il design li differenzi chiaramente).
+- Posa stabile e neutra.
+
+COERENZA COL TUTTO
+- Mantieni scala, stile, materiale e finitura coerenti con l'oggetto completo e con gli altri componenti che ti vengono elencati.
+- NON aggiungere accessori o dettagli che non appartengono a questo pezzo nel design originale.
+- NON ridisegnare il pezzo: descrivi ciò che è visibile/implicito nel design whole-object, scontornando mentalmente SOLO questo componente.
+
+REGOLA CONCETTUALE
+Descrivi il componente come SOGGETTO FOTOGRAFATO REALMENTE, non come render 3D né come oggetto già stampato. NON usare "low-poly", "3D render", "CGI", "stylized", "miniature toy", "3D printed look", "polygonal facets", "blender render" salvo richiesta esplicita.
+
+EVITA materiali altamente riflettenti/trasparenti/subsurface (vetro liscio, acqua) salvo necessità: confondono la depth estimation. EVITA decorazioni 2D piatte (testi grandi, loghi) sulla superficie.
+
+OUTPUT
+- Rispondi SOLO con la descrizione del componente in INGLESE.
+- Una singola frase densa, 70-120 parole, senza preamboli, senza virgolette, senza markdown, senza elenchi puntati.
+- NON ripetere parole come "2x2 grid", "front view", "three-quarter", "side", "back", "studio background", "white background", "soft lighting", "85mm lens": appartengono allo staging.
+- Inizia direttamente con il componente (es. "A squat ceramic teapot body ..." NON "The component is ...").
+- Termina con un punto."""
+
+
+def _parse_json_response(text: str) -> dict:
+    """Estrae un oggetto JSON dalla risposta di Claude, togliendo eventuali fence
+    markdown (```json ... ```). Solleva ValueError se non è parsabile."""
+    text = text.strip()
+    if text.startswith("```"):
+        # rimuove la prima riga di fence (```json o ```) e l'ultima ```
+        text = re.sub(r"^```[a-zA-Z]*\n", "", text)
+        text = re.sub(r"\n```$", "", text.strip())
+    # fallback: ritaglia dal primo { all'ultimo }
+    if not text.lstrip().startswith("{"):
+        start = text.find("{")
+        end = text.rfind("}")
+        if start != -1 and end != -1 and end > start:
+            text = text[start:end + 1]
+    return json.loads(text)
+
+
+def propose_components(prompt: str, design_image: Path) -> dict:
+    """Stadio proposer: dato il subject principale + l'immagine del design
+    whole-object (grid 2x2), ritorna l'inventario dei componenti.
+
+    `prompt` può essere il subject (staging-stripped) o il prompt completo: lo
+    staging non disturba il proposer. Ritorna {components:[...], open_questions:[...]}.
+    """
+    subject = _strip_staging(prompt)
+    content = [
+        {
+            "type": "text",
+            "text": (
+                f"Oggetto da scomporre (descrizione del soggetto):\n{subject}\n\n"
+                "L'immagine qui sotto è il design accettato dell'oggetto intero "
+                "(grid 2x2: front / three-quarter / side / back). Identifica i "
+                "componenti fisici come da regole del system e rispondi SOLO col JSON."
+            ),
+        },
+        _image_block(design_image),
+    ]
+    resp = _client().messages.create(
+        model=config.ANTHROPIC_MODEL,
+        max_tokens=2048,
+        system=COMPONENT_PROPOSER_SYSTEM_PROMPT,
+        messages=[{"role": "user", "content": content}],
+    )
+    usage.record_response("oggetti", resp)
+    return _parse_json_response(resp.content[0].text)
+
+
+def refine_component(
+    main_subject: str,
+    design_image: Path,
+    component: dict,
+    siblings: list[dict],
+    *,
+    feedback: str | None = None,
+) -> str:
+    """Produce il prompt Meshy COMPLETO (subject + staging 2x2) per un singolo
+    componente, context-aware: Claude vede il design whole-object, la scheda del
+    componente e l'elenco dei fratelli. `feedback` opzionale per la rigenerazione.
+    """
+    subject = _strip_staging(main_subject)
+    siblings_summary = "\n".join(
+        f"- {s.get('id')}: {s.get('name')} — {s.get('description', '')}".strip()
+        for s in siblings
+    ) or "(nessun altro componente)"
+
+    rel_summary = "\n".join(
+        f"- {r.get('type')} → {r.get('target_id')}: {r.get('detail', '')}".strip()
+        for r in (component.get("relations") or [])
+    ) or "(nessuna relazione dichiarata)"
+
+    text = (
+        f"Oggetto completo (subject):\n{subject}\n\n"
+        f"Componente da descrivere ISOLATO:\n"
+        f"- id: {component.get('id')}\n"
+        f"- name: {component.get('name')}\n"
+        f"- description: {component.get('description', '')}\n"
+        f"- relative_scale: {component.get('relative_scale', '')}\n"
+        f"- interface: {component.get('interface', '')}\n"
+        f"relazioni di accoppiamento:\n{rel_summary}\n\n"
+        f"Altri componenti (fratelli) dell'oggetto:\n{siblings_summary}\n\n"
+        "L'immagine qui sotto è il design dell'oggetto INTERO (grid 2x2). "
+        "Scontorna mentalmente SOLO il componente indicato e descrivilo isolato, "
+        "mantenendo scala/stile/materiale coerenti col tutto ed esplicitando la "
+        "geometria dell'interfaccia di accoppiamento. Stesse regole del system."
+    )
+    if feedback:
+        text += f"\n\nFeedback dell'utente sull'ultima versione del componente: {feedback}"
+
+    content = [{"type": "text", "text": text}, _image_block(design_image)]
+    resp = _client().messages.create(
+        model=config.ANTHROPIC_MODEL,
+        max_tokens=1024,
+        system=COMPONENT_REFINER_SYSTEM_PROMPT,
+        messages=[{"role": "user", "content": content}],
     )
     usage.record_response("oggetti", resp)
     return _compose_object_prompt(resp.content[0].text)

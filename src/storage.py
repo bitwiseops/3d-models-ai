@@ -150,6 +150,96 @@ def load_metadata(session: Path) -> dict:
         return json.loads((session / "metadata.json").read_text(encoding="utf-8"))
 
 
+# --- Componenti ------------------------------------------------------------
+# Dopo l'accettazione del design, l'oggetto viene scomposto in componenti
+# (vedi workflow.breakdown_into_components). Ogni componente vive sotto
+# components/<id>/ con i suoi prompt e le sue immagini; components/components.json
+# è il CONTRATTO di handoff letto dalla skill fusion-build-from-components.
+
+def create_component_dir(session: Path, component_id: str) -> Path:
+    """Crea components/<slug>/{prompts,images} e ritorna la dir del componente.
+    Lo slug è derivato dall'id (già slug dal proposer, ri-sanificato per sicurezza)."""
+    slug = _slugify(component_id)
+    comp_dir = session / "components" / slug
+    (comp_dir / "prompts").mkdir(parents=True, exist_ok=True)
+    (comp_dir / "images").mkdir(parents=True, exist_ok=True)
+    return comp_dir
+
+
+def save_component_prompt(session: Path, component_id: str, version: int, text: str) -> Path:
+    slug = _slugify(component_id)
+    path = session / "components" / slug / "prompts" / f"{version:02d}_refined.txt"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(text, encoding="utf-8")
+    return path
+
+
+def save_component_image_from_url(
+    session: Path, component_id: str, version: int, url: str
+) -> Path:
+    """Scarica la grid 2x2 del componente in components/<id>/images/NN_grid.png.
+    Il crop nei 4 quadranti lo fa il workflow (riusa grid_utils.crop_grid_2x2)."""
+    slug = _slugify(component_id)
+    path = session / "components" / slug / "images" / f"{version:02d}_grid.png"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    r = requests.get(url, timeout=60)
+    r.raise_for_status()
+    path.write_bytes(r.content)
+    return path
+
+
+def save_components_manifest(session: Path, manifest: dict) -> Path:
+    """Valida e salva components/components.json (SSOT di handoff) e aggiorna
+    metadata.json con un sommario.
+
+    Validazione: `components` lista non vuota, `id` univoci, ogni `relations.target_id`
+    deve riferirsi a un id presente. Solleva ValueError se non valido.
+    """
+    components = manifest.get("components")
+    if not isinstance(components, list) or not components:
+        raise ValueError("manifest componenti non valido: 'components' lista non vuota richiesta.")
+    ids: list[str] = []
+    for i, c in enumerate(components):
+        cid = c.get("id")
+        if not cid:
+            raise ValueError(f"componente #{i} senza 'id'.")
+        if cid in ids:
+            raise ValueError(f"id componente duplicato: '{cid}'.")
+        ids.append(cid)
+    id_set = set(ids)
+    for c in components:
+        for r in c.get("relations") or []:
+            tgt = r.get("target_id")
+            if tgt and tgt not in id_set:
+                raise ValueError(
+                    f"componente '{c.get('id')}': relazione verso id inesistente '{tgt}'."
+                )
+
+    comp_root = session / "components"
+    comp_root.mkdir(parents=True, exist_ok=True)
+    path = comp_root / "components.json"
+    path.write_text(json.dumps(manifest, indent=2, ensure_ascii=False), encoding="utf-8")
+    update_metadata(
+        session,
+        components={
+            "count": len(ids),
+            "ids": ids,
+            "manifest_path": "components/components.json",
+            "all_approved": all(c.get("approved") for c in components),
+        },
+    )
+    return path
+
+
+def load_components_manifest(session: Path) -> dict:
+    path = session / "components" / "components.json"
+    if not path.exists():
+        raise FileNotFoundError(
+            f"Nessun components.json in {session}: lancia prima `breakdown`."
+        )
+    return json.loads(path.read_text(encoding="utf-8"))
+
+
 def cleanup_session(session: Path, *, apply: bool = False) -> dict:
     """Elenca (o cancella, se apply=True) gli intermedi 3D pesanti di una
     sessione, tenendo `model.glb` (preview viewer) e `model_printable.{stl,3mf}`

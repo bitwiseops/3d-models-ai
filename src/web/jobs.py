@@ -15,7 +15,10 @@ from concurrent.futures import Future, ThreadPoolExecutor
 from dataclasses import dataclass, field
 from typing import Any, AsyncIterator, Callable, Literal
 
-JobKind = Literal["image", "feedback", "accept", "portrait", "portrait_bust_3d", "scad"]
+JobKind = Literal[
+    "image", "feedback", "accept", "portrait", "portrait_bust_3d", "scad",
+    "breakdown", "component_regen",
+]
 JobStatus = Literal["pending", "running", "done", "failed"]
 
 

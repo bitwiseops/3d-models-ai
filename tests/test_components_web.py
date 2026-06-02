@@ -1,0 +1,131 @@
+"""Smoke test web della scomposizione in componenti (Parte A), offline.
+
+Mocka la generazione (Claude + Meshy) come fa test_components_breakdown, ma
+esercita gli endpoint FastAPI: breakdown, fragment card, approve.
+"""
+from __future__ import annotations
+
+import time
+from pathlib import Path
+
+import pytest
+from fastapi.testclient import TestClient
+from PIL import Image
+
+from src import config, storage, workflow
+from src.web import app as web_app
+
+
+@pytest.fixture
+def tmp_outputs(tmp_path: Path, monkeypatch) -> Path:
+    monkeypatch.setattr(config, "OUTPUTS_ROOT", tmp_path)
+    return tmp_path
+
+
+@pytest.fixture
+def client(tmp_outputs: Path):
+    app = web_app.create_app()
+    with TestClient(app) as c:
+        yield c
+
+
+def _accepted_session(name: str) -> Path:
+    from src import grid_utils
+
+    session = storage.create_session(name)
+    grid = session / "images" / "01_grid.png"
+    Image.new("RGB", (64, 64), (200, 180, 160)).save(grid)
+    crops = grid_utils.crop_grid_2x2(grid, prefix=grid.stem)
+    storage.update_metadata(
+        session,
+        append_iteration={
+            "version": 1,
+            "prompt": "A squat ceramic teapot.",
+            "image_task_id": "t",
+            "image_path": "images/01_grid.png",
+            "grid_path": "images/01_grid.png",
+            "image_paths_grid": [str(c.relative_to(session)) for c in crops],
+            "credits": 9,
+        },
+        accepted_iteration=1,
+        image_task_id="t",
+    )
+    return session
+
+
+def _mock_generation(monkeypatch):
+    def fake_meshy_grid(session, prompt, *, references=None, label="", on_progress=None, api_key=None):
+        return "fake://grid", "task", 9
+
+    def fake_save(session, component_id, version, url):
+        path = storage.create_component_dir(session, component_id) / "images" / f"{version:02d}_grid.png"
+        Image.new("RGB", (64, 64), (120, 120, 200)).save(path)
+        return path
+
+    monkeypatch.setattr(workflow, "_meshy_grid", fake_meshy_grid)
+    monkeypatch.setattr(storage, "save_component_image_from_url", fake_save)
+    monkeypatch.setattr(
+        workflow.prompt_refiner, "propose_components",
+        lambda subject, img: {"components": [
+            {"id": "body", "name": "Body", "description": "corpo",
+             "relations": [{"type": "on_top_of", "target_id": "lid", "detail": "x"}],
+             "relative_scale": "70%", "interface": "apertura"},
+            {"id": "lid", "name": "Lid", "description": "coperchio",
+             "relations": [], "relative_scale": "15%", "interface": "flangia"},
+        ], "open_questions": []},
+    )
+    monkeypatch.setattr(
+        workflow.prompt_refiner, "refine_component",
+        lambda subject, img, comp, siblings, feedback=None: f"A {comp['id']}.",
+    )
+    monkeypatch.setattr(workflow.prompt_refiner.usage, "record_response", lambda *a, **k: None)
+
+
+def _wait_components(session: Path, timeout: float = 5.0) -> dict:
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        meta = storage.load_metadata(session)
+        if meta.get("components"):
+            return meta
+        time.sleep(0.05)
+    return storage.load_metadata(session)
+
+
+def test_breakdown_endpoint_and_cards(client: TestClient, monkeypatch) -> None:
+    _mock_generation(monkeypatch)
+    session = _accepted_session("teiera web")
+    sid = session.name
+
+    # la detail mostra il bottone Scomponi (post-accept, niente componenti)
+    r = client.get(f"/sessions/{sid}")
+    assert r.status_code == 200
+    assert "Scomponi in componenti" in r.text
+
+    # avvia il breakdown
+    r = client.post(f"/sessions/{sid}/breakdown")
+    assert r.status_code == 200
+    assert "job-progress-card" in r.text
+
+    meta = _wait_components(session)
+    assert meta["components"]["count"] == 2
+
+    # fragment card
+    r = client.get(f"/sessions/{sid}/components")
+    assert r.status_code == 200
+    assert "Body" in r.text and "Lid" in r.text
+    assert "Approva" in r.text
+
+
+def test_approve_endpoint(client: TestClient, monkeypatch) -> None:
+    _mock_generation(monkeypatch)
+    session = _accepted_session("teiera approve")
+    sid = session.name
+    workflow.breakdown_into_components(session)
+
+    r = client.post(f"/sessions/{sid}/components/body/approve")
+    assert r.status_code == 200
+    assert "Approvato" in r.text
+
+    data = storage.load_components_manifest(session)
+    body = next(c for c in data["components"] if c["id"] == "body")
+    assert body["approved"] is True

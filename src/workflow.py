@@ -138,18 +138,27 @@ def _open_image(path: Path) -> None:
         print(f"  (impossibile aprire viewer di sistema, l'immagine è qui: {path})")
 
 
-def _generate_image(
+def _meshy_grid(
     session: Path,
-    version: int,
     prompt: str,
     *,
+    references: list[Path] | None = None,
+    label: str,
     on_progress: ProgressCallback = None,
     api_key: str | None = None,
-) -> Path:
-    references = _session_references(session)
+) -> tuple[str, str, int]:
+    """Genera una grid 2x2 via Meshy e ritorna `(image_url, task_id, credits)`.
+
+    Se `references` è non vuota usa image-to-image (con eventuale pre-step di
+    pulizia reference, come da config/metadata di sessione); altrimenti
+    text-to-image. Le credit dell'eventuale clean vengono registrate qui
+    (`add_credits image_clean`); le credit del task immagine sono ritornate al
+    chiamante che decide in che bucket sommarle. Corpo condiviso tra le
+    iterazioni Oggetti (`_generate_image`) e i componenti (`_generate_component_image`).
+    """
     if references:
         print(
-            f"\nGenerazione immagine v{version} via Meshy "
+            f"\nGenerazione {label} via Meshy "
             f"image-to-image ({config.MESHY_IMAGE_MODEL}, {len(references)} reference)…"
         )
         ref_uris = [_to_data_uri_any(p) for p in references]
@@ -163,7 +172,7 @@ def _generate_image(
             clean_task = meshy_client.poll(
                 "/image-to-image",
                 clean_task_id,
-                label=f"clean v{version}",
+                label=f"clean {label}",
                 max_wait=600,
                 on_progress=on_progress,
                 api_key=api_key,
@@ -182,7 +191,7 @@ def _generate_image(
         endpoint = "/image-to-image"
     else:
         print(
-            f"\nGenerazione immagine v{version} via Meshy "
+            f"\nGenerazione {label} via Meshy "
             f"text-to-image ({config.MESHY_IMAGE_MODEL}, {IMAGE_ASPECT_RATIO})…"
         )
         img_task_id = meshy_client.text_to_image(
@@ -192,19 +201,39 @@ def _generate_image(
     task = meshy_client.poll(
         endpoint,
         img_task_id,
-        label=f"image v{version}",
+        label=label,
         max_wait=600,
         on_progress=on_progress,
         api_key=api_key,
     )
     image_url = task["image_urls"][0]
+    credits = task.get("consumed_credits", 0)
+    return image_url, img_task_id, credits
+
+
+def _generate_image(
+    session: Path,
+    version: int,
+    prompt: str,
+    *,
+    on_progress: ProgressCallback = None,
+    api_key: str | None = None,
+) -> Path:
+    references = _session_references(session)
+    image_url, img_task_id, credits = _meshy_grid(
+        session,
+        prompt,
+        references=references or None,
+        label=f"image v{version}",
+        on_progress=on_progress,
+        api_key=api_key,
+    )
     grid_path = storage.save_image_from_url(session, version, image_url)
     # Rename the saved file to highlight that it's the grid source.
     new_grid_path = grid_path.with_name(grid_path.stem + "_grid.png")
     grid_path.rename(new_grid_path)
     grid_path = new_grid_path
     quadrants = grid_utils.crop_grid_2x2(grid_path, prefix=grid_path.stem)
-    credits = task.get("consumed_credits", 0)
     iter_record = {
         "version": version,
         "prompt": prompt,
@@ -544,6 +573,250 @@ def accept_and_generate_3d(
 
     print(f"\nFatto. Output: {session}")
     return saved
+
+
+# --- Scomposizione in componenti -------------------------------------------
+# Stadio post-accept: l'oggetto accettato viene scomposto in componenti, ognuno
+# con un prompt context-aware e una propria grid 2x2 (4 viste). L'output è il
+# bundle components/components.json letto dalla skill fusion-build-from-components.
+
+# Nomi dei 4 quadranti nell'ordine prodotto da grid_utils.crop_grid_2x2.
+_QUADRANT_NAMES = [name for name, _, _ in grid_utils.GRID_QUADRANTS]
+
+
+def _generate_component_image(
+    session: Path,
+    component_id: str,
+    version: int,
+    prompt: str,
+    *,
+    on_progress: ProgressCallback = None,
+    api_key: str | None = None,
+) -> dict:
+    """Genera la grid 2x2 di un componente (text-to-image), la salva sotto
+    components/<id>/images/ e la ritaglia nei 4 quadranti. Ritorna
+    {grid_path, views:{view:rel}, task_id, credits} con path RELATIVI alla session.
+    """
+    image_url, img_task_id, credits = _meshy_grid(
+        session,
+        prompt,
+        references=None,
+        label=f"componente {component_id} v{version}",
+        on_progress=on_progress,
+        api_key=api_key,
+    )
+    grid_path = storage.save_component_image_from_url(
+        session, component_id, version, image_url
+    )
+    quadrants = grid_utils.crop_grid_2x2(grid_path, prefix=grid_path.stem)
+    storage.update_metadata(session, add_credits={"text_to_image": credits})
+    views = {
+        name: str(q.relative_to(session))
+        for name, q in zip(_QUADRANT_NAMES, quadrants)
+    }
+    print(f"  componente {component_id}: grid {grid_path.name} (credits {credits})")
+    return {
+        "grid_path": str(grid_path.relative_to(session)),
+        "views": views,
+        "task_id": img_task_id,
+        "credits": credits,
+    }
+
+
+def breakdown_into_components(
+    session: Path,
+    *,
+    on_progress: ProgressCallback = None,
+    on_step: StepCallback = None,
+    api_key: str | None = None,
+    skip_open: bool = False,
+    force: bool = False,
+) -> dict:
+    """Scompone l'oggetto accettato in componenti e genera per ciascuno un prompt
+    context-aware + una grid 2x2. Salva components/components.json (bundle di
+    handoff). Ritorna il manifest dei componenti.
+
+    Precondizione: la sessione deve avere un'iterazione accettata. Se i componenti
+    esistono già solleva, salvo `force=True` (rigenera da capo).
+    """
+    meta = storage.load_metadata(session)
+    iters = meta.get("iterations") or []
+    if not iters:
+        raise RuntimeError("Sessione senza iterazioni: usa prima `start`.")
+    if meta.get("accepted_iteration") is None:
+        raise RuntimeError(
+            "Sessione non accettata: accetta un'iterazione prima di scomporla."
+        )
+    if meta.get("components") and not force:
+        raise RuntimeError(
+            "Sessione già scomposta in componenti (usa force=True per rigenerare)."
+        )
+
+    accepted = meta["accepted_iteration"]
+    it = next((x for x in iters if x.get("version") == accepted), iters[-1])
+    main_prompt = it["prompt"]
+    main_subject = prompt_refiner._strip_staging(main_prompt)
+    design_grid = session / (it.get("grid_path") or it["image_path"])
+    design_views = {
+        name: rel
+        for name, rel in zip(_QUADRANT_NAMES, it.get("image_paths_grid") or [])
+    }
+
+    def _on_claude(model: str, inp: int, out: int) -> None:
+        storage.update_metadata(
+            session,
+            add_claude_usage={"model": model, "input_tokens": inp, "output_tokens": out},
+        )
+
+    if on_step:
+        on_step("proposta componenti con Claude…")
+    print("\n[1/2] Proposta componenti con Claude…")
+    with usage_mod.session_scope(_on_claude):
+        proposal = prompt_refiner.propose_components(main_subject, design_grid)
+    components_in = proposal.get("components") or []
+    if not components_in:
+        raise RuntimeError("Il proposer non ha prodotto componenti.")
+    print(
+        f"  {len(components_in)} componenti proposti: "
+        f"{', '.join(str(c.get('id', '?')) for c in components_in)}"
+    )
+
+    out_components: list[dict] = []
+    n = len(components_in)
+    for i, comp in enumerate(components_in, start=1):
+        cid = comp.get("id")
+        siblings = [c for c in components_in if c.get("id") != cid]
+        label = f"componente {i}/{n}: {cid}"
+        if on_step:
+            on_step(f"{label} — refine prompt")
+        print(f"\n[2/2] {label} — refine prompt")
+        with usage_mod.session_scope(_on_claude):
+            comp_prompt = prompt_refiner.refine_component(
+                main_subject, design_grid, comp, siblings
+            )
+        storage.create_component_dir(session, cid)
+        storage.save_component_prompt(session, cid, 1, comp_prompt)
+        if on_step:
+            on_step(f"{label} — generazione immagine")
+        img = _generate_component_image(
+            session, cid, 1, comp_prompt, on_progress=on_progress, api_key=api_key
+        )
+        out_components.append(
+            {
+                "id": cid,
+                "name": comp.get("name"),
+                "description": comp.get("description"),
+                "relations": comp.get("relations") or [],
+                "relative_scale": comp.get("relative_scale"),
+                "interface": comp.get("interface"),
+                "prompt": comp_prompt,
+                "grid_image": img["grid_path"],
+                "views": img["views"],
+                "version": 1,
+                "status": "generated",
+                "approved": False,
+                "history": [{"version": 1, "prompt": comp_prompt, "feedback": None}],
+            }
+        )
+
+    manifest = {
+        "schema_version": 1,
+        "source_session": session.name,
+        "main_prompt": main_prompt,
+        "main_subject": main_subject,
+        "design_image": str(design_grid.relative_to(session)),
+        "design_views": design_views,
+        "components": out_components,
+        "open_questions": proposal.get("open_questions") or [],
+        "consumed_by": [],
+    }
+    path = storage.save_components_manifest(session, manifest)
+    print(f"\nScomposizione completata: {len(out_components)} componenti → {path}")
+    return manifest
+
+
+def regenerate_component(
+    session: Path,
+    component_id: str,
+    feedback: str,
+    *,
+    on_progress: ProgressCallback = None,
+    api_key: str | None = None,
+    skip_open: bool = False,
+) -> Path:
+    """Rigenera un singolo componente con feedback (Claude vede la scheda del
+    componente + il design whole-object). Bumpa la version, appende alla history,
+    riscrive components.json. Vietato se i componenti sono già stati consumati da
+    una build. Ritorna il path della nuova grid."""
+    manifest = storage.load_components_manifest(session)
+    if manifest.get("consumed_by"):
+        raise RuntimeError(
+            "Componenti già consumati da una build Fusion: rigenerazione bloccata."
+        )
+    components = manifest.get("components") or []
+    comp = next((c for c in components if c.get("id") == component_id), None)
+    if comp is None:
+        raise RuntimeError(f"Componente '{component_id}' non trovato.")
+
+    main_subject = manifest.get("main_subject") or prompt_refiner._strip_staging(
+        manifest.get("main_prompt", "")
+    )
+    design_grid = session / manifest["design_image"]
+    siblings = [c for c in components if c.get("id") != component_id]
+
+    def _on_claude(model: str, inp: int, out: int) -> None:
+        storage.update_metadata(
+            session,
+            add_claude_usage={"model": model, "input_tokens": inp, "output_tokens": out},
+        )
+
+    print(f"\nRigenerazione componente '{component_id}' con feedback…")
+    with usage_mod.session_scope(_on_claude):
+        new_prompt = prompt_refiner.refine_component(
+            main_subject, design_grid, comp, siblings, feedback=feedback
+        )
+    new_version = int(comp.get("version", 1)) + 1
+    storage.save_component_prompt(session, component_id, new_version, new_prompt)
+    img = _generate_component_image(
+        session,
+        component_id,
+        new_version,
+        new_prompt,
+        on_progress=on_progress,
+        api_key=api_key,
+    )
+    comp.update(
+        {
+            "prompt": new_prompt,
+            "grid_image": img["grid_path"],
+            "views": img["views"],
+            "version": new_version,
+            "status": "generated",
+            "approved": False,
+        }
+    )
+    comp.setdefault("history", []).append(
+        {"version": new_version, "prompt": new_prompt, "feedback": feedback}
+    )
+    storage.save_components_manifest(session, manifest)
+    grid_path = session / img["grid_path"]
+    if not skip_open:
+        _open_image(grid_path)
+    return grid_path
+
+
+def approve_component(session: Path, component_id: str, approved: bool = True) -> dict:
+    """Marca un componente come approvato (o meno) in components.json."""
+    manifest = storage.load_components_manifest(session)
+    comp = next(
+        (c for c in (manifest.get("components") or []) if c.get("id") == component_id),
+        None,
+    )
+    if comp is None:
+        raise RuntimeError(f"Componente '{component_id}' non trovato.")
+    comp["approved"] = bool(approved)
+    storage.save_components_manifest(session, manifest)
+    return comp
 
 
 def run(idea: str) -> Path:

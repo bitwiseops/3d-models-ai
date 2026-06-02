@@ -58,6 +58,33 @@ def cmd_accept(args) -> int:
     return 0
 
 
+def cmd_breakdown(args) -> int:
+    _apply_test_mode(args.test_mode)
+    _ensure_keys()
+    manifest = workflow.breakdown_into_components(
+        Path(args.session), force=args.force
+    )
+    print(f"\nCOMPONENTS={Path(args.session) / 'components' / 'components.json'}")
+    print(f"COUNT={len(manifest.get('components') or [])}")
+    return 0
+
+
+def cmd_breakdown_regen(args) -> int:
+    _apply_test_mode(args.test_mode)
+    _ensure_keys()
+    grid = workflow.regenerate_component(
+        Path(args.session), args.component, args.feedback
+    )
+    print(f"\nIMAGE={grid}")
+    return 0
+
+
+def cmd_breakdown_approve(args) -> int:
+    comp = workflow.approve_component(Path(args.session), args.component)
+    print(f"APPROVED={comp.get('id')} (approved={comp.get('approved')})")
+    return 0
+
+
 def cmd_repair(args) -> int:
     session = Path(args.session)
     stl = session / "3d" / "model.stl"
@@ -192,6 +219,36 @@ def main() -> int:
     )
     p_accept.add_argument("session", help="Path alla session dir.")
     p_accept.set_defaults(func=cmd_accept)
+
+    p_breakdown = sub.add_parser(
+        "breakdown",
+        help="Scompone l'oggetto accettato in componenti: per ognuno genera un "
+        "prompt context-aware + una grid 2x2. Produce components/components.json.",
+    )
+    p_breakdown.add_argument("session", help="Path alla session dir (accettata).")
+    p_breakdown.add_argument(
+        "--force",
+        action="store_true",
+        help="Rigenera i componenti anche se già presenti.",
+    )
+    p_breakdown.set_defaults(func=cmd_breakdown)
+
+    p_bd_regen = sub.add_parser(
+        "breakdown-regen",
+        help="Rigenera un singolo componente con feedback testuale.",
+    )
+    p_bd_regen.add_argument("session", help="Path alla session dir.")
+    p_bd_regen.add_argument("component", help="id del componente da rigenerare.")
+    p_bd_regen.add_argument("feedback", help="Feedback testuale per il refinement.")
+    p_bd_regen.set_defaults(func=cmd_breakdown_regen)
+
+    p_bd_approve = sub.add_parser(
+        "breakdown-approve",
+        help="Marca un componente come approvato in components.json.",
+    )
+    p_bd_approve.add_argument("session", help="Path alla session dir.")
+    p_bd_approve.add_argument("component", help="id del componente da approvare.")
+    p_bd_approve.set_defaults(func=cmd_breakdown_approve)
 
     p_repair = sub.add_parser(
         "repair",

@@ -1,0 +1,73 @@
+{# Card di un singolo componente: 4 viste, stato, approva, rigenera.
+   Renderizzato dentro _components_cards.html (loop) o swappato da solo
+   dall'endpoint /approve. #}
+{% set grid_labels = {'front': 'Front', 'three_quarter': '3/4', 'side': 'Side', 'back': 'Back'} %}
+<div id="component-{{ comp.id }}"
+     class="bg-white dark:bg-stone-900 rounded-xl border border-stone-200 dark:border-stone-800 overflow-hidden">
+  <div class="grid grid-cols-2 gap-px bg-stone-200 dark:bg-stone-800">
+    {% for view in ['front', 'three_quarter', 'side', 'back'] %}
+    {% set rel = comp.views.get(view) %}
+    {% if rel %}
+    <figure class="relative bg-stone-100 dark:bg-stone-800">
+      <img src="{{ root_path }}/sessions/{{ session_id }}/files/{{ rel }}"
+           alt="{{ comp.id }} {{ view }}" loading="lazy" decoding="async"
+           class="w-full aspect-square object-contain">
+      <figcaption class="absolute bottom-1 left-1 text-[10px] uppercase tracking-wide px-1.5 py-0.5 rounded bg-white/80 dark:bg-stone-900/80 text-stone-700 dark:text-stone-300">{{ grid_labels.get(view, view) }}</figcaption>
+    </figure>
+    {% endif %}
+    {% endfor %}
+  </div>
+  <div class="p-4 space-y-2">
+    <div class="flex items-center justify-between gap-2">
+      <span class="text-sm font-semibold">{{ comp.name or comp.id }}</span>
+      {% if comp.approved %}
+      <span class="text-xs font-medium text-emerald-700 dark:text-emerald-300 bg-emerald-50 dark:bg-emerald-950/50 px-2 py-0.5 rounded-full">Approvato</span>
+      {% else %}
+      <span class="text-xs text-stone-500 dark:text-stone-400">v{{ comp.version }}</span>
+      {% endif %}
+    </div>
+    {% if comp.description %}
+    <p class="text-xs text-stone-600 dark:text-stone-300 leading-relaxed">{{ comp.description }}</p>
+    {% endif %}
+    {% if comp.interface %}
+    <p class="text-[11px] text-stone-500 dark:text-stone-400"><span class="uppercase tracking-wide">interfaccia:</span> {{ comp.interface }}</p>
+    {% endif %}
+    {% if comp.relations %}
+    <p class="text-[11px] text-stone-500 dark:text-stone-400">
+      {% for r in comp.relations %}<span class="inline-block">{{ r.type }} → {{ r.target_id }}</span>{% if not loop.last %} · {% endif %}{% endfor %}
+    </p>
+    {% endif %}
+
+    <div class="flex gap-2 pt-1">
+      {% if not comp.approved %}
+      <button hx-post="{{ root_path }}/sessions/{{ session_id }}/components/{{ comp.id }}/approve"
+              hx-target="#component-{{ comp.id }}"
+              hx-swap="outerHTML"
+              class="flex-1 rounded-lg bg-emerald-600 text-white px-3 py-2 text-xs font-medium hover:bg-emerald-500 min-h-10">
+        ✓ Approva
+      </button>
+      {% endif %}
+    </div>
+
+    <details class="text-sm text-stone-700 dark:text-stone-300">
+      <summary class="cursor-pointer text-stone-500 dark:text-stone-400 hover:text-stone-900 dark:hover:text-stone-100 py-2 -my-2 text-xs">rigenera con feedback</summary>
+      <form hx-post="{{ root_path }}/sessions/{{ session_id }}/components/{{ comp.id }}/regen"
+            hx-target="#components-progress-mount"
+            hx-swap="innerHTML"
+            class="mt-2 space-y-2">
+        <textarea name="feedback" required rows="2"
+                  placeholder="es. flangia più alta, smusso sul bordo"
+                  class="block w-full rounded-lg border-stone-300 dark:border-stone-700 bg-stone-50 dark:bg-stone-800 px-3 py-2 text-sm"></textarea>
+        <button type="submit"
+                class="w-full rounded-lg border border-stone-300 dark:border-stone-700 text-stone-700 dark:text-stone-200 px-3 py-2 text-xs font-medium hover:bg-stone-50 dark:hover:bg-stone-800 min-h-10">
+          Rigenera componente
+        </button>
+      </form>
+    </details>
+
+    <details class="text-sm text-stone-700 dark:text-stone-300">
+      <summary class="cursor-pointer text-stone-500 dark:text-stone-400 hover:text-stone-900 dark:hover:text-stone-100 py-2 -my-2 text-xs">prompt</summary>
+      <p class="mt-2 whitespace-pre-wrap text-[11px] leading-relaxed">{{ comp.prompt }}</p>
+    </details>
+  </div>
+</div>

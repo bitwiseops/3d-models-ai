@@ -17,7 +17,7 @@
   <div class="flex items-center gap-2">
     <span class="inline-block w-2.5 h-2.5 rounded-full border-2 border-amber-500 border-t-transparent spin"></span>
     <span class="text-sm font-medium">
-      {% if job.kind == 'image' %}Generazione immagine{% elif job.kind == 'feedback' %}Rigenerazione immagine{% elif job.kind == 'accept' %}Generazione 3D{% else %}{{ job.kind }}{% endif %}
+      {% if job.kind == 'image' %}Generazione immagine{% elif job.kind == 'feedback' %}Rigenerazione immagine{% elif job.kind == 'accept' %}Generazione 3D{% elif job.kind == 'breakdown' %}Scomposizione in componenti{% elif job.kind == 'component_regen' %}Rigenerazione componente{% else %}{{ job.kind }}{% endif %}
     </span>
     <span class="ml-auto text-xs text-stone-500 dark:text-stone-400">{{ job.progress }}%</span>
   </div>

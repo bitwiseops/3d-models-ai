@@ -23,7 +23,16 @@ from fastapi.templating import Jinja2Templates
 from .. import config
 from .deps import get_outputs_root
 from .jobs import JobManager
-from .routes import events, files, iterations, portraits, scad, sessions, usage
+from .routes import (
+    components,
+    events,
+    files,
+    iterations,
+    portraits,
+    scad,
+    sessions,
+    usage,
+)
 from .routes.sessions import sessions_page_context
 
 TEMPLATES_DIR = Path(__file__).parent / "templates"
@@ -100,6 +109,7 @@ def create_app() -> FastAPI:
     # Routes
     app.include_router(sessions.router)
     app.include_router(iterations.router)
+    app.include_router(components.router)
     app.include_router(events.router)
     app.include_router(files.router)
     app.include_router(portraits.router)

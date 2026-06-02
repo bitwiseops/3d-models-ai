@@ -143,3 +143,43 @@
   {% endif %}
 </section>
 {% endif %}
+
+{# Scomposizione in componenti: stadio post-accept (web), input per la skill PC. #}
+{% if meta.accepted_iteration is not none %}
+<section class="mt-8 space-y-3">
+  <div class="flex items-center justify-between">
+    <h2 class="text-lg font-semibold">Componenti</h2>
+    {% if meta.components %}
+    <span class="text-xs text-stone-500 dark:text-stone-400">{{ meta.components.count }} pezzi</span>
+    {% endif %}
+  </div>
+
+  <div id="components-progress-mount"></div>
+
+  {% if not meta.components and not active_job %}
+  <div class="bg-white dark:bg-stone-900 border border-stone-200 dark:border-stone-800 rounded-xl p-4 space-y-3">
+    <p class="text-sm text-stone-600 dark:text-stone-300">
+      Scomponi l'oggetto nei suoi pezzi: ogni componente ottiene un prompt
+      dedicato (consapevole del contesto) e una propria grid 2x2. È l'input per
+      la build parametrica in Fusion.
+    </p>
+    <form hx-post="{{ root_path }}/sessions/{{ session_id }}/breakdown"
+          hx-target="#components-progress-mount"
+          hx-swap="innerHTML"
+          hx-confirm="Avviare la scomposizione in componenti? Verranno generate più immagini Meshy (una grid per componente).">
+      <button type="submit"
+              class="w-full rounded-lg border border-sky-300 dark:border-sky-800 bg-sky-50 dark:bg-sky-950/40 text-sky-800 dark:text-sky-200 px-4 py-2 text-sm font-medium hover:bg-sky-100 dark:hover:bg-sky-950 min-h-11">
+        ⊞ Scomponi in componenti
+      </button>
+    </form>
+  </div>
+  {% elif meta.components %}
+  <div id="components-cards"
+       hx-get="{{ root_path }}/sessions/{{ session_id }}/components"
+       hx-trigger="load"
+       hx-swap="innerHTML">
+    <p class="text-sm text-stone-400 dark:text-stone-500">Carico i componenti…</p>
+  </div>
+  {% endif %}
+</section>
+{% endif %}
