@@ -15,8 +15,6 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 OUTPUTS_ROOT = PROJECT_ROOT / "outputs"
 
 ANTHROPIC_MODEL = "claude-opus-4-7"
-# Override per il workflow SCAD (code-gen, costo/qualità diverso da prompt-refine).
-SCAD_MODEL = os.environ.get("SCAD_MODEL", "claude-sonnet-4-6")
 MESHY_IMAGE_MODEL = "nano-banana-pro"
 MESHY_3D_MODEL = "meshy-6"
 
@@ -26,9 +24,6 @@ MESHY_3D_MODEL = "meshy-6"
 MESHY_CLEAN_REFERENCES = os.environ.get("MESHY_CLEAN_REFERENCES", "").lower() in (
     "1", "true", "yes", "on",
 )
-
-# Path o nome del binario OpenSCAD. Overridable per AppImage/headless wrapper.
-OPENSCAD_BIN = os.environ.get("OPENSCAD_BIN", "openscad")
 
 
 def assert_keys_present() -> None:

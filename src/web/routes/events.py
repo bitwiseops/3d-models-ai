@@ -26,8 +26,6 @@ def _render_job_fragment(request: Request, session_id: str, snapshot: dict) -> s
     kind = snapshot.get("kind")
     if kind in ("portrait", "portrait_bust_3d"):
         tpl_name = "_portrait_progress_inner.html"
-    elif kind == "scad":
-        tpl_name = "_scad_progress_inner.html"
     else:
         tpl_name = "_job_progress_inner.html"
     return templates.get_template(tpl_name).render(
@@ -84,7 +82,7 @@ async def session_events(
     jm: JobManager = Depends(get_job_manager),
 ) -> EventSourceResponse:
     """SSE livello sessione: segue il job attivo (se esiste).
-    Emette eventi "iteration_added" / "3d_ready" alla fine, leggibili da HTMX
+    Emette l'evento "iteration_added" alla fine, leggibile da HTMX
     via `hx-trigger="sse:iteration_added"` per refreshare la lista iterazioni.
     """
     async def stream():
@@ -99,9 +97,7 @@ async def session_events(
             status = snapshot.get("status")
             if status == "done":
                 kind = snapshot.get("kind", "image")
-                if kind == "accept":
-                    event_type = "3d_ready"
-                elif kind == "portrait":
+                if kind == "portrait":
                     event_type = "portrait_ready"
                 elif kind == "portrait_bust_3d":
                     event_type = "bust_3d_ready"

@@ -71,13 +71,45 @@ async def get_components(
     templates = request.app.state.templates
     manifest = _load_components(session)
     active_job = jm.active_for_session(session_id)
+    meta = storage.load_metadata(session)
     return templates.TemplateResponse(
         request,
         "_components_cards.html",
         {
             "session_id": session_id,
             "manifest": manifest,
+            "breakdown_accepted": meta.get("breakdown_accepted", False),
             "active_job": active_job.snapshot() if active_job else None,
+        },
+    )
+
+
+@router.post("/breakdown/accept", response_class=HTMLResponse)
+async def post_breakdown_accept(
+    session_id: str,
+    request: Request,
+    session: Path = Depends(resolve_session),
+    jm: JobManager = Depends(get_job_manager),
+) -> HTMLResponse:
+    """Accetta la decomposizione nel suo insieme: chiude il cerchio (stato
+    finale della sessione). Ri-renderizza la griglia con i controlli per-parte
+    disabilitati e il badge finale."""
+    if jm.active_for_session(session_id) is not None:
+        raise HTTPException(status_code=409, detail="Job già in corso per questa sessione")
+    try:
+        workflow.accept_breakdown(session)
+    except RuntimeError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+    templates = request.app.state.templates
+    return templates.TemplateResponse(
+        request,
+        "_components_cards.html",
+        {
+            "session_id": session_id,
+            "manifest": _load_components(session),
+            "breakdown_accepted": True,
+            "active_job": None,
         },
     )
 
@@ -129,8 +161,13 @@ async def post_component_approve(
     except RuntimeError as e:
         raise HTTPException(status_code=404, detail=str(e))
     templates = request.app.state.templates
+    meta = storage.load_metadata(session)
     return templates.TemplateResponse(
         request,
         "_component_card.html",
-        {"session_id": session_id, "comp": comp},
+        {
+            "session_id": session_id,
+            "comp": comp,
+            "breakdown_accepted": meta.get("breakdown_accepted", False),
+        },
     )

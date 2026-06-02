@@ -1,7 +1,7 @@
 {# Mini report costo, apribile inline. Usa <details> nativo per non
    introdurre JS. Passa `cb` = dict ritornato da usage.breakdown_*.
 
-   Schema atteso (kind == "mixed" o "scad"):
+   Schema atteso (kind == "mixed"):
    - meshy_lines:   [{label, credits, cost_usd}]      (solo "mixed")
    - claude_lines:  [{label, input_tokens, output_tokens, cost_usd}]
    - meshy_total_credits, meshy_total_usd, claude_total_usd, total_usd
@@ -58,7 +58,7 @@
         {% endif %}
       </ul>
     </div>
-    {% elif cb.kind != "scad" %}
+    {% else %}
     <p class="text-[11px] text-stone-400 dark:text-stone-500 italic">Nessuna chiamata Claude tracciata per questa sessione (sessione vecchia o non ancora generata).</p>
     {% endif %}
 

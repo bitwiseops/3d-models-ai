@@ -33,9 +33,9 @@
          id="iterations-wrapper"
          hx-ext="sse"
          sse-connect="{{ root_path }}/events/sessions/{{ session_id }}"
-         sse-swap="iteration_added,3d_ready"
+         sse-swap="iteration_added"
          hx-get="{{ root_path }}/sessions/{{ session_id }}/fragment"
-         hx-trigger="sse:iteration_added,sse:3d_ready"
+         hx-trigger="sse:iteration_added"
          hx-swap="innerHTML">
   {% include "_iteration_list.html" %}
 </section>

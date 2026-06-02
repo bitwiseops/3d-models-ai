@@ -33,7 +33,9 @@ def _list_sessions(outputs_root: Path) -> list[dict]:
             last_iter = meta["iterations"][-1]
             last_thumb = last_iter.get("clean_path") or last_iter.get("image_path")
         status = "draft"
-        if meta.get("model_task_id"):
+        # `model_task_id` è il marcatore legacy (vecchie sessioni con 3D Meshy);
+        # `breakdown_accepted` è il nuovo stato finale ("cerchio chiuso").
+        if meta.get("breakdown_accepted") or meta.get("model_task_id"):
             status = "completed"
         elif meta.get("accepted_iteration") is not None:
             status = "accepted"
@@ -148,48 +150,6 @@ async def session_detail(
     )
 
 
-@router.get("/{session_id}/ab", response_class=HTMLResponse)
-async def session_ab_compare(
-    session_id: str,
-    request: Request,
-    session: Path = Depends(resolve_session),
-) -> HTMLResponse:
-    """Pagina di confronto A/B (multi-view vs single-view) per una sessione
-    che ha già il 3D normale + un output single-view in 3d_ab/single_view/."""
-    import trimesh
-
-    templates = request.app.state.templates
-    meta = storage.load_metadata(session)
-    ab_dir = session / "3d_ab" / "single_view"
-    if not (ab_dir / "model.glb").exists():
-        raise HTTPException(
-            status_code=404,
-            detail="A/B output non presente. Lancia tools/ab_single_view.py prima.",
-        )
-
-    def _stats(p: Path) -> dict:
-        m = trimesh.load(str(p), force="mesh", process=False)
-        bbox = (m.bounds[1] - m.bounds[0]).tolist()
-        return {"bbox": [round(float(x), 1) for x in bbox]}
-
-    a_stats = _stats(session / "3d" / "model.stl")
-    b_stats = _stats(ab_dir / "model.stl")
-    a_meta = meta.get("ab_single_view")  # potrebbe essere None
-    y_diff_pct = round((a_stats["bbox"][1] - b_stats["bbox"][1]) / a_stats["bbox"][1] * 100, 1)
-
-    return templates.TemplateResponse(
-        request,
-        "ab_compare.html",
-        {
-            "session_id": session_id,
-            "meta": meta,
-            "a": {"bbox": a_stats["bbox"], "credits": meta.get("credits", {}).get("image_to_3d")},
-            "b": {"bbox": b_stats["bbox"], "credits": (a_meta or {}).get("credits")},
-            "y_diff_pct": y_diff_pct,
-        },
-    )
-
-
 @router.get("/{session_id}/fragment", response_class=HTMLResponse)
 async def session_fragment(
     session_id: str,
@@ -197,7 +157,7 @@ async def session_fragment(
     session: Path = Depends(resolve_session),
     jm: JobManager = Depends(get_job_manager),
 ) -> HTMLResponse:
-    """Fragment con solo la lista iterazioni + 3D viewer (post-SSE refresh)."""
+    """Fragment con la lista iterazioni + scomposizione (post-SSE refresh)."""
     templates = request.app.state.templates
     meta = storage.load_metadata(session)
     active_job = jm.active_for_session(session_id)

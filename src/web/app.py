@@ -29,7 +29,6 @@ from .routes import (
     files,
     iterations,
     portraits,
-    scad,
     sessions,
     usage,
 )
@@ -113,7 +112,6 @@ def create_app() -> FastAPI:
     app.include_router(events.router)
     app.include_router(files.router)
     app.include_router(portraits.router)
-    app.include_router(scad.router)
     app.include_router(usage.router)
 
     # Static assets (HDR per model-viewer environment, ecc.)

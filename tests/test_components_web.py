@@ -53,6 +53,29 @@ def _accepted_session(name: str) -> Path:
     return session
 
 
+def _session_with_iteration(name: str) -> Path:
+    """Come _accepted_session ma SENZA accettazione: ha solo l'iterazione v1."""
+    from src import grid_utils
+
+    session = storage.create_session(name)
+    grid = session / "images" / "01_grid.png"
+    Image.new("RGB", (64, 64), (200, 180, 160)).save(grid)
+    crops = grid_utils.crop_grid_2x2(grid, prefix=grid.stem)
+    storage.update_metadata(
+        session,
+        append_iteration={
+            "version": 1,
+            "prompt": "A squat ceramic teapot.",
+            "image_task_id": "t",
+            "image_path": "images/01_grid.png",
+            "grid_path": "images/01_grid.png",
+            "image_paths_grid": [str(c.relative_to(session)) for c in crops],
+            "credits": 9,
+        },
+    )
+    return session
+
+
 def _mock_generation(monkeypatch):
     def fake_meshy_grid(session, prompt, *, references=None, label="", on_progress=None, api_key=None):
         return "fake://grid", "task", 9
@@ -129,3 +152,65 @@ def test_approve_endpoint(client: TestClient, monkeypatch) -> None:
     data = storage.load_components_manifest(session)
     body = next(c for c in data["components"] if c["id"] == "body")
     assert body["approved"] is True
+
+
+def test_accept_triggers_breakdown(client: TestClient, monkeypatch) -> None:
+    """Accettare un'idea avvia subito la scomposizione, senza generare 3D."""
+    _mock_generation(monkeypatch)
+    session = _session_with_iteration("teiera accept")
+    sid = session.name
+
+    # la detail mostra il bottone Accetta (non ancora accettata)
+    r = client.get(f"/sessions/{sid}")
+    assert r.status_code == 200
+    assert "Accetta e scomponi" in r.text
+
+    # accetta → il job avvia il breakdown
+    r = client.post(f"/sessions/{sid}/accept")
+    assert r.status_code == 200
+    assert "job-progress-card" in r.text
+
+    meta = _wait_components(session)
+    assert meta["accepted_iteration"] == 1
+    assert meta["components"]["count"] == 2
+    # niente generazione 3D negli Oggetti
+    assert not meta.get("model_files")
+    assert not meta.get("model_task_id")
+
+
+def test_breakdown_accept_gate(client: TestClient, monkeypatch) -> None:
+    """Il gate globale 'Accetta decomposizione' chiude il cerchio."""
+    _mock_generation(monkeypatch)
+    session = _accepted_session("teiera gate")
+    sid = session.name
+    workflow.breakdown_into_components(session)
+
+    # prima della chiusura: bottone gate presente, niente badge finale
+    r = client.get(f"/sessions/{sid}/components")
+    assert r.status_code == 200
+    assert "Accetta decomposizione" in r.text
+    assert "cerchio chiuso" not in r.text
+
+    # chiusura
+    r = client.post(f"/sessions/{sid}/breakdown/accept")
+    assert r.status_code == 200
+    assert "cerchio chiuso" in r.text
+    assert "Accetta decomposizione" not in r.text
+
+    meta = storage.load_metadata(session)
+    assert meta.get("breakdown_accepted") is True
+
+
+def test_no_3d_in_objects(client: TestClient, monkeypatch) -> None:
+    """Le sessioni Oggetti non mostrano viewer 3D e la rotta A/B è rimossa."""
+    _mock_generation(monkeypatch)
+    session = _accepted_session("teiera no3d")
+    sid = session.name
+
+    r = client.get(f"/sessions/{sid}")
+    assert r.status_code == 200
+    assert "<model-viewer" not in r.text
+
+    # rotta A/B rimossa
+    r = client.get(f"/sessions/{sid}/ab")
+    assert r.status_code == 404

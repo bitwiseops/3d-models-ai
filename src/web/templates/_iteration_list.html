@@ -1,5 +1,5 @@
-{# Lista iterazioni + sezione 3D + form feedback/accept. Renderizzato come
-   pagina completa OR come fragment HTMX dopo evento SSE. #}
+{# Lista iterazioni + form feedback/accept + scomposizione in componenti.
+   Renderizzato come pagina completa OR come fragment HTMX dopo evento SSE. #}
 
 {% if active_job %}
 {# Sticky solo se ci sono iterazioni sopra da scrollare; nelle sessioni
@@ -60,17 +60,6 @@
              class="mt-2 w-full aspect-square object-contain rounded-lg bg-stone-100 dark:bg-stone-800">
       </details>
       {% endif %}
-      {% if it.image_paths_grid or it.clean_path or it.image_path %}
-      <form method="post"
-            action="{{ root_path }}/sessions/{{ session_id }}/iterations/{{ it.version }}/to_scad"
-            onsubmit="return confirm('{{ C.SCAD_FROM_ITERATION_CONFIRM }}');"
-            class="pt-2">
-        <button type="submit"
-                class="w-full rounded-lg border border-purple-300 dark:border-purple-800 bg-purple-50 dark:bg-purple-950/40 text-purple-800 dark:text-purple-200 px-4 py-2 text-sm font-medium hover:bg-purple-100 dark:hover:bg-purple-950 min-h-11">
-          {{ C.SCAD_FROM_ITERATION_LABEL }}
-        </button>
-      </form>
-      {% endif %}
     </div>
   </li>
   {% endfor %}
@@ -103,55 +92,29 @@
   <form hx-post="{{ root_path }}/sessions/{{ session_id }}/accept"
         hx-target="#job-progress-mount"
         hx-swap="innerHTML"
-        hx-confirm="Avviare la pipeline 3D? L'iterazione corrente verrà accettata e non si potrà più rigenerare.">
+        hx-confirm="Accettare l'iterazione e avviare la scomposizione in componenti? Non si potrà più rigenerare l'immagine.">
     <button type="submit"
             class="w-full rounded-lg bg-emerald-600 text-white px-4 py-3 text-base font-medium hover:bg-emerald-500 min-h-12">
-      ✓ Accetta e genera 3D
+      ✓ Accetta e scomponi
     </button>
   </form>
   <div id="job-progress-mount"></div>
 </section>
 {% endif %}
 
-{# 3D viewer + download: solo se la pipeline è completa #}
-{% set printable = meta.printable_files or {} %}
-{% set raw_glb = meta.model_files.get('glb') if meta.model_files else None %}
-{% if raw_glb or printable %}
-<section class="mt-8 space-y-3">
-  <h2 class="text-lg font-semibold">Modello 3D</h2>
-  {% if raw_glb %}
-  <div class="bg-white dark:bg-stone-900 rounded-xl border border-stone-200 dark:border-stone-800 overflow-hidden">
-    <model-viewer src="{{ root_path }}/sessions/{{ session_id }}/files/{{ raw_glb }}"
-                  camera-controls touch-action="pan-y" auto-rotate ar
-                  style="width:100%; height:min(60dvh, 520px); background:#f5f5f4;"></model-viewer>
-    <p class="px-4 py-2 text-xs text-stone-500 dark:text-stone-400 border-t border-stone-200 dark:border-stone-800">Anteprima Meshy raw (con texture PBR)</p>
-  </div>
-  {% endif %}
-  {% if printable %}
-  <div class="bg-white dark:bg-stone-900 border border-stone-200 dark:border-stone-800 rounded-xl p-4 space-y-2">
-    <p class="text-sm font-medium text-stone-700 dark:text-stone-200">Print-ready (manifold garantito)</p>
-    <div class="flex flex-wrap gap-2">
-      {% for fmt, path in printable.items() %}
-      <a href="{{ root_path }}/sessions/{{ session_id }}/files/{{ path }}"
-         download
-         class="inline-flex items-center gap-1 rounded-lg border border-stone-300 dark:border-stone-700 text-stone-700 dark:text-stone-200 px-3 py-2 text-sm font-medium hover:bg-stone-50 dark:hover:bg-stone-800 min-h-11">
-        ⬇ {{ fmt | upper }}
-      </a>
-      {% endfor %}
-    </div>
-  </div>
-  {% endif %}
-</section>
-{% endif %}
-
 {# Scomposizione in componenti: stadio post-accept (web), input per la skill PC. #}
 {% if meta.accepted_iteration is not none %}
 <section class="mt-8 space-y-3">
-  <div class="flex items-center justify-between">
+  <div class="flex items-center justify-between gap-2">
     <h2 class="text-lg font-semibold">Componenti</h2>
-    {% if meta.components %}
-    <span class="text-xs text-stone-500 dark:text-stone-400">{{ meta.components.count }} pezzi</span>
-    {% endif %}
+    <div class="flex items-center gap-2">
+      {% if meta.breakdown_accepted %}
+      <span class="text-xs font-medium text-emerald-700 dark:text-emerald-300 bg-emerald-50 dark:bg-emerald-950/50 px-2 py-0.5 rounded-full">Decomposizione accettata</span>
+      {% endif %}
+      {% if meta.components %}
+      <span class="text-xs text-stone-500 dark:text-stone-400">{{ meta.components.count }} pezzi</span>
+      {% endif %}
+    </div>
   </div>
 
   <div id="components-progress-mount"></div>

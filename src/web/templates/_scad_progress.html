@@ -1,7 +1,0 @@
-{# Outer wrapper SSE per il progress card SCAD. #}
-<div id="job-progress-card"
-     hx-ext="sse"
-     sse-connect="{{ root_path }}/events/{{ job.job_id }}"
-     sse-swap="message">
-  {% include "_scad_progress_inner.html" %}
-</div>

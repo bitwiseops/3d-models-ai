@@ -38,6 +38,7 @@
     </p>
     {% endif %}
 
+    {% if not breakdown_accepted %}
     <div class="flex gap-2 pt-1">
       {% if not comp.approved %}
       <button hx-post="{{ root_path }}/sessions/{{ session_id }}/components/{{ comp.id }}/approve"
@@ -64,6 +65,7 @@
         </button>
       </form>
     </details>
+    {% endif %}
 
     <details class="text-sm text-stone-700 dark:text-stone-300">
       <summary class="cursor-pointer text-stone-500 dark:text-stone-400 hover:text-stone-900 dark:hover:text-stone-100 py-2 -my-2 text-xs">prompt</summary>

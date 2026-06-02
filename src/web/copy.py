@@ -26,20 +26,15 @@ class C:
 
     # Placeholder
     PLACEHOLDER_IDEA_OBJ = "es. supporto cuffie da scrivania, base ø80, altezza 200"
-    PLACEHOLDER_IDEA_SCAD = "es. supporto cuffie ø80 h200, gancio inclinato 15°"
     PLACEHOLDER_PROMPT_PORTRAIT = (
         "es. wearing red coat, neutral expression "
         "— lascia vuoto per default (mezzo busto, braccia lungo i fianchi)"
     )
     PLACEHOLDER_FEEDBACK = "es. più alto, più sottile, smussa gli angoli"
 
-    # Shortcut Meshy → SCAD
-    SCAD_FROM_ITERATION_LABEL = "→ Genera SCAD da questa vista"
-    SCAD_FROM_ITERATION_CONFIRM = "Creare nuova sessione SCAD da questa iterazione?"
-
     # Status
     STATUS_DRAFT = "Bozza"
     STATUS_RUNNING = "In elaborazione"
-    STATUS_ACCEPTED = "Generazione 3D…"
+    STATUS_ACCEPTED = "Scomposizione…"
     STATUS_DONE = "Pronto"
     STATUS_FAILED = "Errore"

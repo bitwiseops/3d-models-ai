@@ -18,7 +18,7 @@ from typing import Callable, Literal
 
 from . import config
 
-Section = Literal["oggetti", "portraits", "scad"]
+Section = Literal["oggetti", "portraits"]
 
 # Prezzi ufficiali Anthropic ($ per milione di token, input / output).
 # Aggiornare quando cambiano: https://www.anthropic.com/pricing
@@ -35,10 +35,10 @@ _DEFAULT_PRICE = (15.0, 75.0)
 # Per dati legacy senza model info: euristica = il modello che la sezione usa
 # attualmente (config.py). Sottostima leggermente se in passato si usava un
 # modello diverso, ma è la migliore inferenza possibile retroattivamente.
+# Sezioni storiche non più attive (es. "scad") cadono sul fallback Opus.
 _LEGACY_MODEL_BY_SECTION: dict[str, str] = {
     "oggetti": config.ANTHROPIC_MODEL,
     "portraits": config.ANTHROPIC_MODEL,
-    "scad": config.SCAD_MODEL,
 }
 
 # Meshy non pubblica un USD/credit ufficiale stabile; valore tipico PAYG.
@@ -59,7 +59,6 @@ def _empty() -> dict:
         "by_section": {
             "oggetti": _empty_section(),
             "portraits": _empty_section(),
-            "scad": _empty_section(),
         },
     }
 
@@ -94,8 +93,9 @@ def _read() -> dict:
         return _empty()
     if data.get("schema_version") != 2:
         data = _migrate_v1_to_v2(data)
-    # Garantisce le sezioni standard.
-    for sec in ("oggetti", "portraits", "scad"):
+    # Garantisce le sezioni standard (eventuali sezioni storiche come "scad"
+    # restano leggibili senza essere ricreate).
+    for sec in ("oggetti", "portraits"):
         data["by_section"].setdefault(sec, _empty_section())
     return data
 
@@ -263,11 +263,6 @@ def session_cost_meshy(meta: dict) -> float:
     return meshy_cost(meta.get("credits"))
 
 
-def session_cost_scad(meta: dict) -> float:
-    """Costo di una sessione SCAD: token Claude (Sonnet di default)."""
-    return claude_cost_from_tokens(config.SCAD_MODEL, meta.get("usage"))
-
-
 def session_cost_portrait(meta: dict) -> float:
     """Costo di una sessione Portrait: credits Meshy (Claude refiner non
     tracciato per-sessione, escluso)."""
@@ -327,34 +322,6 @@ def breakdown_meshy(meta: dict) -> dict:
             f"Meshy ~${MESHY_USD_PER_CREDIT:.2f}/credit · "
             f"Claude tariffato per modello (Opus 4.7 $15/$75, Sonnet 4.6 $3/$15 per M)."
         ),
-    }
-
-
-def breakdown_scad(meta: dict) -> dict:
-    """Breakdown costo SCAD: token Claude per modello (ora SCAD usa solo
-    SCAD_MODEL, ma il claude_usage può contenere più modelli in futuro)."""
-    # Compat: schema vecchio salva direttamente `usage = {input, output}` (1 modello).
-    u = meta.get("usage") or {}
-    legacy_in = int(u.get("input_tokens", 0) or 0)
-    legacy_out = int(u.get("output_tokens", 0) or 0)
-    claude_lines, claude_total = _claude_lines_from_meta(meta)
-    if not claude_lines and (legacy_in or legacy_out):
-        model = config.SCAD_MODEL
-        cost = _cost(model, legacy_in, legacy_out)
-        claude_lines = [{
-            "label": f"Claude · {model}",
-            "model": model,
-            "input_tokens": legacy_in,
-            "output_tokens": legacy_out,
-            "cost_usd": cost,
-        }]
-        claude_total = cost
-    return {
-        "kind": "scad",
-        "claude_lines": claude_lines,
-        "claude_total_usd": claude_total,
-        "total_usd": claude_total,
-        "rate_note": "Claude tariffato per modello (Sonnet 4.6 $3/$15 per M).",
     }
 
 

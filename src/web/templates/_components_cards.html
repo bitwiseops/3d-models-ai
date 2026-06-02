@@ -15,4 +15,21 @@
   {% include "_component_card.html" %}
   {% endfor %}
 </div>
+
+{# Gate finale: accettare la decomposizione chiude il cerchio. #}
+{% if breakdown_accepted %}
+<div class="mt-4 rounded-xl border border-emerald-200 dark:border-emerald-900 bg-emerald-50 dark:bg-emerald-950/40 p-4 text-sm text-emerald-800 dark:text-emerald-200">
+  ✓ Decomposizione accettata · cerchio chiuso. Il bundle <code>components.json</code> è pronto per la build parametrica in Fusion.
+</div>
+{% else %}
+<div class="mt-4">
+  <button hx-post="{{ root_path }}/sessions/{{ session_id }}/breakdown/accept"
+          hx-target="#components-cards"
+          hx-swap="innerHTML"
+          hx-confirm="Accettare la decomposizione? Diventa lo stato finale della sessione: non potrai più rigenerare i singoli componenti."
+          class="w-full rounded-lg bg-emerald-600 text-white px-4 py-3 text-base font-medium hover:bg-emerald-500 min-h-12">
+    ✓ Accetta decomposizione
+  </button>
+</div>
+{% endif %}
 {% endif %}

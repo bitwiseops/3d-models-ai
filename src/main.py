@@ -54,7 +54,7 @@ def cmd_reject(args) -> int:
 def cmd_accept(args) -> int:
     _apply_test_mode(args.test_mode)
     _ensure_keys()
-    workflow.accept_and_generate_3d(Path(args.session))
+    workflow.accept_and_breakdown(Path(args.session))
     return 0
 
 
@@ -215,7 +215,7 @@ def main() -> int:
     p_reject.set_defaults(func=cmd_reject)
 
     p_accept = sub.add_parser(
-        "accept", help="Accetta l'ultima immagine e genera il modello 3D."
+        "accept", help="Accetta l'ultima immagine e scompone in componenti."
     )
     p_accept.add_argument("session", help="Path alla session dir.")
     p_accept.set_defaults(func=cmd_accept)

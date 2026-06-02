@@ -6,9 +6,10 @@
 {% set label_map = {
     'image': 'Generazione immagine',
     'feedback': 'Rigenerazione immagine',
-    'accept': 'Generazione 3D',
+    'breakdown': 'Scomposizione in componenti',
+    'component_regen': 'Rigenerazione componente',
     'portrait': 'Generazione portrait',
-    'scad': 'Generazione SCAD'
+    'portrait_bust_3d': 'Generazione busto 3D'
 } %}
 {% set label = label_map.get(agj.kind, 'In corso') %}
 <div id="progress-pill"

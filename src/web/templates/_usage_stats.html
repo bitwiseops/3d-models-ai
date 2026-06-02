@@ -1,4 +1,6 @@
 {% set sec_labels = {'oggetti': 'Oggetti', 'portraits': 'Portraits', 'scad': 'SCAD'} %}
+{# Sezioni attive + eventuali sezioni storiche (es. scad) presenti nei dati. #}
+{% set sections = ['oggetti', 'portraits'] + (local.by_section.keys() | reject('in', ['oggetti', 'portraits']) | list) %}
 <div class="space-y-5">
 
   {# --- Meshy balance live --- #}
@@ -41,11 +43,11 @@
         {{ "{:,}".format(local.totals.input_tokens) }} in · {{ "{:,}".format(local.totals.output_tokens) }} out
       </p>
       <div class="pt-2 border-t border-stone-200 dark:border-stone-800 space-y-2">
-        {% for key in ['oggetti', 'portraits', 'scad'] %}
+        {% for key in sections %}
         {% set v = local.by_section.get(key, {'input_tokens': 0, 'output_tokens': 0, 'calls': 0, 'cost_usd': 0, 'by_model': []}) %}
         <div>
           <div class="flex items-center justify-between gap-3 text-sm">
-            <span class="text-stone-700 dark:text-stone-300">{{ sec_labels[key] }}</span>
+            <span class="text-stone-700 dark:text-stone-300">{{ sec_labels.get(key, key|capitalize) }}</span>
             <span class="text-xs text-stone-500 dark:text-stone-400 ml-auto">{{ v.calls }} call · {{ "{:,}".format(v.input_tokens) }}/{{ "{:,}".format(v.output_tokens) }}</span>
             <span class="font-medium tabular-nums w-20 text-right">${{ "%.4f"|format(v.cost_usd) }}</span>
           </div>

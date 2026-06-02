@@ -7,12 +7,9 @@ from typing import Callable
 import numpy as np
 from PIL import Image
 
-from . import config, grid_utils, mesh_repair, meshy_client, prompt_refiner, storage, usage as usage_mod
+from . import config, grid_utils, meshy_client, prompt_refiner, storage, usage as usage_mod
 
 
-# STL per processing (single mesh fuso), GLB per preview <model-viewer> nella web UI.
-# Meshy include il GLB nello stesso task: zero credit extra.
-TARGET_FORMATS = ("stl", "glb")
 # Grid 2x2 (4 viste in un'unica immagine), poi cropped lato Python.
 IMAGE_ASPECT_RATIO = "1:1"
 
@@ -28,7 +25,7 @@ CLEAN_REFERENCE_PROMPT = (
 
 # Tipi callback opzionali per web/SSE.
 ProgressCallback = Callable[[int, str], None] | None  # (progress_pct, status)
-StepCallback = Callable[[str], None] | None  # mesh_repair step labels
+StepCallback = Callable[[str], None] | None  # step labels granulari
 
 
 def _detect_center_band(
@@ -105,11 +102,6 @@ def _split_image(image_path: Path) -> tuple[Path, Path, Path | None]:
         clean.save(clean_path, format="PNG")
 
     return front_path, back_path, clean_path
-
-
-def _to_data_uri(path: Path) -> str:
-    data = base64.b64encode(path.read_bytes()).decode("ascii")
-    return f"data:image/png;base64,{data}"
 
 
 def _to_data_uri_any(path: Path) -> str:
@@ -395,184 +387,41 @@ def continue_with_feedback(
     return image_path
 
 
-def accept_and_generate_3d(
+def accept_and_breakdown(
     session: Path,
     *,
     on_progress: ProgressCallback = None,
     on_step: StepCallback = None,
     api_key: str | None = None,
+    force: bool = False,
 ) -> dict:
-    """Marca l'ultima iterazione come accettata e lancia la fase image-to-3d.
+    """Marca l'ultima iterazione come accettata e avvia subito la scomposizione
+    in componenti (handoff verso la build parametrica Fusion).
 
-    Web/SSE: `on_progress(pct, status)` per il polling Meshy 3D (può durare
-    10-30 min); `on_step(label)` per i messaggi granulari della mesh_repair
-    pipeline (repair → decimate → flatten_base).
+    Non genera più modelli 3D negli Oggetti: l'accettazione "apre" direttamente
+    lo stadio di decomposizione. `on_progress`/`on_step` sono inoltrati a
+    `breakdown_into_components` per il progress del job.
     """
     meta = storage.load_metadata(session)
     if not meta["iterations"]:
         raise RuntimeError("Sessione senza iterazioni.")
-    if meta.get("model_task_id"):
-        raise RuntimeError("Fase 3D già completata per questa sessione.")
 
     last = meta["iterations"][-1]
-    storage.update_metadata(
-        session,
-        accepted_iteration=last["version"],
-        image_task_id=last["image_task_id"],
-    )
+    if meta.get("accepted_iteration") is None:
+        storage.update_metadata(
+            session,
+            accepted_iteration=last["version"],
+            image_task_id=last.get("image_task_id"),
+        )
 
-    print(f"\n[3/3] Generazione 3D multi-view via Meshy ({config.MESHY_3D_MODEL})…")
-    if last.get("image_paths_grid"):
-        # Nuovo flusso: 4 quadranti del grid 2x2 → multi-image-to-3d.
-        quadrant_paths = [session / p for p in last["image_paths_grid"]]
-        image_urls = [_to_data_uri(p) for p in quadrant_paths]
-        print(f"  input: {len(image_urls)} viste dal grid 2x2")
-    else:
-        # Legacy: front + back dalla vecchia split 16:9.
-        front = session / last["front_path"]
-        back = session / last["back_path"]
-        image_urls = [_to_data_uri(front), _to_data_uri(back)]
-        print("  input: legacy front + back (2 viste)")
-    model_task_id = meshy_client.multi_image_to_3d(
-        image_urls=image_urls,
-        target_formats=TARGET_FORMATS,
-        enable_pbr=True,
-        api_key=api_key,
-    )
-    model_task = meshy_client.poll(
-        "/multi-image-to-3d",
-        model_task_id,
-        label="3D model",
-        max_wait=1800,
+    return breakdown_into_components(
+        session,
         on_progress=on_progress,
+        on_step=on_step,
         api_key=api_key,
+        skip_open=True,
+        force=force,
     )
-    model_urls = model_task.get("model_urls", {})
-    saved = {}
-    for fmt in TARGET_FORMATS:
-        url = model_urls.get(fmt)
-        if not url:
-            print(f"  attenzione: nessun URL per formato {fmt}")
-            continue
-        path = storage.save_3d_from_url(session, fmt, url)
-        saved[fmt] = str(path.relative_to(session))
-        print(f"  {fmt.upper()} salvato: {path}")
-
-    storage.update_metadata(
-        session,
-        model_task_id=model_task_id,
-        model_files=saved,
-        add_credits={"image_to_3d": model_task.get("consumed_credits", 0)},
-    )
-
-    src_for_repair = saved.get("stl")
-
-    # Cross-check stampabilità via Meshy (GRATIS) + fallback repair server-side.
-    # Best-effort: se l'API print fallisce, la pipeline locale prosegue invariata.
-    try:
-        printability = meshy_client.print_analyze(
-            input_task_id=model_task_id, api_key=api_key
-        )
-        status = printability.get("status", "unknown")
-        metrics = printability.get("metrics", {})
-        msg = (
-            f"printability Meshy: {status} "
-            f"(watertight={metrics.get('is_watertight')}, "
-            f"non_manifold={metrics.get('non_manifold_edges')}, "
-            f"degenerate={metrics.get('degenerate_faces')}, "
-            f"holes={metrics.get('holes')})"
-        )
-        print(f"[analyze] {msg}")
-        if on_step:
-            on_step(msg)
-        storage.update_metadata(session, printability=printability)
-
-        if status == "error":
-            print("[analyze] status=error → repair server-side Meshy (10cr)…")
-            if on_step:
-                on_step("mesh non stampabile → repair server-side Meshy")
-            repaired_url = meshy_client.print_repair(
-                input_task_id=model_task_id, api_key=api_key
-            )
-            # Basename distinto da `model_repaired.*` del repair locale: altrimenti
-            # mesh_repair.repair() (più sotto) sovrascriverebbe lo STL Meshy.
-            glb_path = storage.save_3d_from_url(
-                session, "glb", repaired_url, filename="model_meshy_repaired.glb"
-            )
-            # /print/repair con input_task_id restituisce GLB → converti in STL
-            # per la pipeline locale (repair → decimate → flatten).
-            import trimesh
-
-            stl_path = session / "3d" / "model_meshy_repaired.stl"
-            trimesh.load(str(glb_path), force="mesh").export(str(stl_path))
-            src_for_repair = str(stl_path.relative_to(session))
-            storage.update_metadata(
-                session,
-                meshy_repaired_files={
-                    "glb": str(glb_path.relative_to(session)),
-                    "stl": str(stl_path.relative_to(session)),
-                },
-                add_credits={"print_repair": 10},
-            )
-            print(f"[analyze] mesh riparato Meshy → {stl_path}")
-    except Exception as e:
-        print(f"[analyze] saltato (best-effort): {e}")
-
-    repaired: dict[str, Path] | None = None
-    if src_for_repair:
-        print("\n[repair] post-processing per stampa…")
-        try:
-            repaired = mesh_repair.repair(
-                session / src_for_repair, session / "3d", on_step=on_step
-            )
-            storage.update_metadata(
-                session,
-                repaired_files={
-                    k: str(v.relative_to(session)) for k, v in repaired.items()
-                },
-            )
-        except Exception as e:
-            print(f"[repair] FALLITO: {e}")
-
-    lowpoly: dict[str, Path] | None = None
-    if repaired and "stl" in repaired:
-        print("\n[decimate] riduzione mesh per portabilità…")
-        try:
-            lowpoly = mesh_repair.decimate(
-                repaired["stl"],
-                session / "3d",
-                target_faces=mesh_repair.DEFAULT_TARGET_FACES,
-                on_step=on_step,
-            )
-            storage.update_metadata(
-                session,
-                lowpoly_files={
-                    k: str(v.relative_to(session)) for k, v in lowpoly.items()
-                },
-            )
-        except Exception as e:
-            print(f"[decimate] FALLITO: {e}")
-
-    if lowpoly and "stl" in lowpoly:
-        print("\n[flatten] taglio base piatta per stampa…")
-        try:
-            printable = mesh_repair.flatten_base(
-                lowpoly["stl"],
-                session / "3d",
-                base_thickness_pct=mesh_repair.DEFAULT_BASE_THICKNESS_PCT,
-                on_step=on_step,
-            )
-            storage.update_metadata(
-                session,
-                printable_files={
-                    k: str(v.relative_to(session)) for k, v in printable.items()
-                },
-            )
-        except Exception as e:
-            print(f"[flatten] FALLITO: {e}")
-
-    print(f"\nFatto. Output: {session}")
-    return saved
 
 
 # --- Scomposizione in componenti -------------------------------------------
@@ -819,6 +668,17 @@ def approve_component(session: Path, component_id: str, approved: bool = True) -
     return comp
 
 
+def accept_breakdown(session: Path) -> dict:
+    """Accetta la decomposizione nel suo insieme: stato finale della sessione
+    ("chiude il cerchio"). Setta il flag top-level `breakdown_accepted` in
+    metadata. Richiede che la decomposizione esista."""
+    meta = storage.load_metadata(session)
+    if not meta.get("components"):
+        raise RuntimeError("Nessuna decomposizione da accettare.")
+    storage.update_metadata(session, breakdown_accepted=True)
+    return storage.load_metadata(session)
+
+
 def run(idea: str) -> Path:
     """Loop interattivo (input() da terminale). Per modalità non-interattiva
     usa i sub-comandi start/reject/accept."""
@@ -828,7 +688,7 @@ def run(idea: str) -> Path:
         if decision == "accept":
             break
         continue_with_feedback(session, feedback)
-    accept_and_generate_3d(session)
+    accept_and_breakdown(session)
     return session
 
 
