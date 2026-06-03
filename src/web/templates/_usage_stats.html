@@ -3,32 +3,42 @@
 {% set sections = ['oggetti', 'portraits'] + (local.by_section.keys() | reject('in', ['oggetti', 'portraits']) | list) %}
 <div class="space-y-5">
 
-  {# --- Meshy balance live --- #}
+  {# --- Meshy balance live (una card per chiave: principale + fallback) --- #}
   <section>
     <p class="text-xs uppercase tracking-wide text-stone-500 dark:text-stone-400 mb-2">Meshy · balance</p>
-    {% if meshy.ok %}
-      {% set raw = meshy.raw %}
-      <div class="rounded-xl border border-stone-200 dark:border-stone-800 bg-stone-50 dark:bg-stone-800/40 p-4">
-        <div class="flex items-baseline justify-between gap-3">
-          <span class="text-2xl font-semibold tabular-nums">
-            {{ raw.balance if raw.balance is defined else (raw.free_credits|default(0) + raw.paid_credits|default(0)) }}
-          </span>
-          <span class="text-xs text-stone-500 dark:text-stone-400">credits</span>
+    <div class="space-y-2">
+      {% for m in meshy_keys %}
+      {% if m.ok %}
+        {% set raw = m.raw %}
+        <div class="rounded-xl border border-stone-200 dark:border-stone-800 bg-stone-50 dark:bg-stone-800/40 p-4">
+          <div class="flex items-baseline justify-between gap-3">
+            <span class="text-xs font-medium text-stone-600 dark:text-stone-300">
+              {{ m.label }}{% if m.key_hint %} <span class="text-stone-400 dark:text-stone-500">· {{ m.key_hint }}</span>{% endif %}
+            </span>
+            <span class="text-xs text-stone-500 dark:text-stone-400">credits</span>
+          </div>
+          <div class="flex items-baseline justify-between gap-3 mt-1">
+            <span class="text-2xl font-semibold tabular-nums">
+              {{ raw.balance if raw.balance is defined else (raw.free_credits|default(0) + raw.paid_credits|default(0)) }}
+            </span>
+            {% if raw.subscription is defined %}
+            <span class="text-xs text-stone-500 dark:text-stone-400">plan: {{ raw.subscription }}</span>
+            {% endif %}
+          </div>
+          {% if raw.free_credits is defined or raw.paid_credits is defined %}
+          <p class="text-xs text-stone-500 dark:text-stone-400 mt-1">
+            free: {{ raw.free_credits|default(0) }} · paid: {{ raw.paid_credits|default(0) }}
+          </p>
+          {% endif %}
         </div>
-        {% if raw.subscription is defined %}
-        <p class="text-xs text-stone-500 dark:text-stone-400 mt-1">plan: {{ raw.subscription }}</p>
-        {% endif %}
-        {% if raw.free_credits is defined or raw.paid_credits is defined %}
-        <p class="text-xs text-stone-500 dark:text-stone-400 mt-1">
-          free: {{ raw.free_credits|default(0) }} · paid: {{ raw.paid_credits|default(0) }}
-        </p>
-        {% endif %}
-      </div>
-    {% else %}
-      <div class="rounded-xl border border-amber-200 dark:border-amber-900 bg-amber-50 dark:bg-amber-950/40 p-3 text-xs text-amber-800 dark:text-amber-200">
-        Impossibile leggere il balance Meshy: {{ meshy.error }}
-      </div>
-    {% endif %}
+      {% else %}
+        <div class="rounded-xl border border-amber-200 dark:border-amber-900 bg-amber-50 dark:bg-amber-950/40 p-3 text-xs text-amber-800 dark:text-amber-200">
+          <span class="font-medium">{{ m.label }}{% if m.key_hint %} · {{ m.key_hint }}{% endif %}</span> —
+          balance non leggibile: {{ m.error }}
+        </div>
+      {% endif %}
+      {% endfor %}
+    </div>
   </section>
 
   {# --- Tracking locale Claude (per sezione di questa app) --- #}

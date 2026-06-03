@@ -12,7 +12,7 @@ router = APIRouter()
 def _gather() -> dict:
     return {
         "local": usage_mod.read_stats(),
-        "meshy": usage_remote.fetch_meshy_balance(),
+        "meshy_keys": usage_remote.fetch_meshy_balances(),
     }
 
 
