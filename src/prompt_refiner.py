@@ -86,8 +86,14 @@ OBJECT_GRID_STAGING_BLOCK = (
     "cast shadows on background or under the object (hard shadows are read as "
     "geometry by the 3D reconstructor); neutral exposure, no DOF, no bokeh, no "
     "motion blur, no dutch tilt, no lens flare, no vignette. Both cells must "
-    "depict exactly the same object with consistent geometry, proportions, "
-    "colors and details. No labels, captions, arrows, numbers, watermarks, "
+    "depict exactly the same physical object with perfectly consistent geometry, "
+    "proportions, colors and details across the two views; any hole, slot, "
+    "cut-out, recess or opening that passes ALL THE WAY THROUGH the object must "
+    "appear in BOTH views at mutually corresponding positions (a through-hole "
+    "seen on the front view must show its matching opening on the rear view, and "
+    "you must be able to see straight through it); never add a feature in one "
+    "view that is missing in the other unless it physically lies only on a face "
+    "that is visible in that single view. No labels, captions, arrows, numbers, watermarks, "
     "decorative borders. The image will be split into 2 separate three-quarter "
     "views and fed to a multi-image-to-3D model as a blueprint for 3D printing. "
     "Subject:"
@@ -103,7 +109,7 @@ COSA DEVI SCRIVERE
 Una descrizione fisica densa e tangibile dell'oggetto che l'utente vuole, focalizzata su:
 - Forma generale e silhouette (es. "squat cylindrical body tapering to a flat top", "elongated teardrop with a flat base").
 - Proporzioni e rapporti dimensionali concreti (es. "height ~1.5x the diameter", "handle ~1/3 of body length", "wall thickness implied ~3mm").
-- Dettagli geometrici distintivi (curvature, smussi, spigoli vivi, scanalature, protrusioni, fori funzionali del soggetto stesso, simmetrie/asimmetrie).
+- Dettagli geometrici distintivi (curvature, smussi, spigoli vivi, scanalature, protrusioni, fori funzionali del soggetto stesso, simmetrie/asimmetrie). Per OGNI foro/apertura specifica SEMPRE se è PASSANTE (through-hole, aperto su entrambi i lati, si vede attraverso) o CIECO (blind, su una sola faccia): è cruciale perché le due viste 3/4 devono restare coerenti.
 - Materiali espliciti e tangibili (es. "matte injection-molded ABS", "brushed anodized aluminum", "rough unglazed terracotta with visible throw lines", "weathered oak with open grain"): diventano texture/PBR nel 3D.
 - Palette colori dichiarata (es. "ivory body with cobalt-blue accents").
 - Posa stabile e neutra (poggiato, eretto), nessuna parte sospesa o autoocclusa pesantemente.
@@ -484,8 +490,11 @@ Usa SOLO questi tipi di relazione (lo stesso vocabolario del manifest CAD a vall
 - symmetric_to: speculare rispetto a un altro pezzo
 Per ogni relazione indica `target_id` (l'id di un altro componente) e `detail` (breve, in italiano o inglese: come/dove avviene l'accoppiamento).
 
-INTERFACCIA
-Per ogni componente descrivi l'`interface`: la geometria con cui si accoppia agli altri (es. "apertura superiore ~Ø40mm che riceve la flangia del coperchio", "perno cilindrico che entra nel foro della base", "faccia piana inferiore a filo col corpo"). Questa geometria DEVE poi essere ritratta nell'immagine del componente, perché a valle serve per creare il joint.
+INTERFACCIA (CON DIMENSIONI)
+Per ogni componente descrivi l'`interface`: la geometria con cui si accoppia agli altri, CON DIMENSIONI CONCRETE in mm — diametri, profondità, altezza di flangia, lunghezza/diametro perno, spessori, interasse fori (es. "perno cilindrico Ø8mm lungo 12mm che entra nel foro della base", "apertura superiore Ø40mm profonda 6mm che riceve la flangia del coperchio", "faccia piana inferiore 90x90mm a filo col corpo"). Questa geometria DEVE poi essere ritratta nell'immagine del componente, perché a valle serve per creare il joint.
+
+COERENZA DEGLI INCASTRI (cruciale)
+Sei l'UNICO stadio che vede TUTTI i pezzi insieme: assegna qui le dimensioni degli accoppiamenti e mantienile NUMERICAMENTE COERENTI tra i due pezzi che si incastrano. Maschio e femmina dello stesso giunto condividono lo stesso valore nominale (con eventuale gioco minimo, es. perno Ø8.0mm ↔ foro Ø8.2mm; flangia Ø40mm ↔ sede Ø40.3mm). La stessa quota va citata in ENTRAMBE le `interface` dei due pezzi E nel `detail` della relazione, così a valle l'incastro combacia.
 
 OUTPUT (SOLO JSON, nessun testo attorno, nessun markdown)
 {
@@ -506,6 +515,7 @@ REGOLE
 - Gli `id` sono slug univoci in minuscolo (es. "body", "lid", "handle", "spout").
 - `target_id` deve riferirsi a un altro `id` presente nella lista.
 - Le relazioni vanno dichiarate almeno una volta per ogni coppia di pezzi che si toccano (basta da un lato).
+- Nel `detail` di ogni relazione riporta la dimensione dell'incastro (es. "perno Ø8 nel foro Ø8.2, profondità 12"), coerente con le `interface` dei due pezzi.
 - Rispondi SOLO con il JSON valido."""
 
 
@@ -520,8 +530,9 @@ COSA DEVI SCRIVERE
 Una descrizione fisica densa e tangibile del SOLO componente indicato, come apparirebbe ISOLATO sul tavolo dello studio (staccato dal resto dell'oggetto), focalizzata su:
 - Forma generale e silhouette del pezzo.
 - Proporzioni e rapporti dimensionali concreti, COERENTI con la scala del pezzo nell'oggetto intero e con i pezzi fratelli.
-- Dettagli geometrici distintivi (curvature, smussi, spigoli, scanalature, fori funzionali propri del pezzo).
-- LA GEOMETRIA DELL'INTERFACCIA DI ACCOPPIAMENTO in modo esplicito (il foro, il perno, la flangia, il filetto, la faccia piana di contatto con cui si monta agli altri pezzi): questa geometria DEVE essere visibile e descritta, perché a valle serve per assemblare i pezzi con vincoli CAD.
+- Dettagli geometrici distintivi (curvature, smussi, spigoli, scanalature, fori funzionali propri del pezzo). Per OGNI foro/apertura specifica SEMPRE se è PASSANTE (through-hole, aperto su entrambi i lati) o CIECO (blind): le due viste 3/4 devono mostrarlo in modo coerente.
+- LA GEOMETRIA DELL'INTERFACCIA DI ACCOPPIAMENTO in modo esplicito, CON LE SUE DIMENSIONI in mm (il foro, il perno, la flangia, il filetto, la faccia piana di contatto con cui si monta agli altri pezzi): questa geometria DEVE essere visibile e descritta, perché a valle serve per assemblare i pezzi con vincoli CAD.
+- DIMENSIONI D'INCASTRO COERENTI COI FRATELLI: la scheda del componente e quella dei fratelli ti forniscono le quote degli accoppiamenti (es. perno Ø8 ↔ foro Ø8.2). Riporta nel tuo testo la dimensione ESATTA del giunto come dichiarata, identica a quella del pezzo che vi si accoppia — non inventare valori nuovi né arrotondare diversamente, altrimenti i pezzi non combaceranno.
 - Materiali e finitura COERENTI con l'intero oggetto e i fratelli (stesso materiale/colore salvo che il design li differenzi chiaramente).
 - Posa stabile e neutra.
 
@@ -603,13 +614,18 @@ def refine_component(
     componente e l'elenco dei fratelli. `feedback` opzionale per la rigenerazione.
     """
     subject = _strip_staging(main_subject)
+    # Includi interfaccia + scala dei fratelli: servono al refiner per ripetere
+    # le quote d'incastro IDENTICHE a quelle del pezzo che vi si accoppia.
+    by_id = {s.get("id"): s for s in siblings}
     siblings_summary = "\n".join(
-        f"- {s.get('id')}: {s.get('name')} — {s.get('description', '')}".strip()
+        f"- {s.get('id')}: {s.get('name')} — {s.get('description', '')}"
+        f" [scala: {s.get('relative_scale', '?')}; interfaccia: {s.get('interface', '?')}]".strip()
         for s in siblings
     ) or "(nessun altro componente)"
 
     rel_summary = "\n".join(
-        f"- {r.get('type')} → {r.get('target_id')}: {r.get('detail', '')}".strip()
+        f"- {r.get('type')} → {r.get('target_id')}: {r.get('detail', '')}"
+        f" [interfaccia di {r.get('target_id')}: {(by_id.get(r.get('target_id')) or {}).get('interface', '?')}]".strip()
         for r in (component.get("relations") or [])
     ) or "(nessuna relazione dichiarata)"
 
@@ -627,7 +643,10 @@ def refine_component(
         "front-¾ + rear-¾). Scontorna mentalmente SOLO il componente indicato e "
         "descrivilo isolato, FEDELE a come appare nel design (stessa "
         "scala/stile/materiale/colore), ed esplicitando la geometria "
-        "dell'interfaccia di accoppiamento. Stesse regole del system."
+        "dell'interfaccia di accoppiamento CON LE SUE QUOTE in mm. Le quote del "
+        "giunto devono coincidere ESATTAMENTE con quelle del pezzo che vi si "
+        "accoppia (vedi 'interfaccia' nelle relazioni/fratelli qui sopra): "
+        "riportale identiche, non inventarne di nuove. Stesse regole del system."
     )
     if feedback:
         text += f"\n\nFeedback dell'utente sull'ultima versione del componente: {feedback}"
