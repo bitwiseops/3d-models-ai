@@ -241,11 +241,17 @@ def _generate_image(
     api_key: str | None = None,
 ) -> Path:
     schema = view_schema.DEFAULT_OBJECT_SCHEMA
-    references = _session_references(session)
+    # Generazione SEMPRE text-to-image, anche con reference utente: l'eventuale
+    # reference è già stata usata da Claude (`refine_initial`) per arricchire la
+    # descrizione del soggetto → è un hint TESTUALE. Non la passiamo a Meshy come
+    # image-to-image perché nano-banana-pro riprodurrebbe la singola vista di
+    # reference (output 1:1 con la stessa vista duplicata) invece di sintetizzare
+    # la griglia 1x2 a due viste 3/4 distinte. Il text-to-image col 16:9 dà il
+    # layout corretto.
     image_url, img_task_id, credits = _meshy_grid(
         session,
         prompt,
-        references=references or None,
+        references=None,
         label=f"image v{version}",
         aspect_ratio=schema.aspect_ratio,
         on_progress=on_progress,

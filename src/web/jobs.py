@@ -8,6 +8,7 @@ Ogni Job ha un `progress` (0-100), un `log` (lista di stringhe step) e uno
 from __future__ import annotations
 
 import asyncio
+import sys
 import time
 import traceback
 import uuid
@@ -157,6 +158,17 @@ class JobManager:
         exc = future.exception()
         if exc is not None:
             tb = "".join(traceback.format_exception(type(exc), exc, exc.__traceback__))
+            # Logga il traceback COMPLETO su stderr (→ portraits.log) per la
+            # diagnosi: senza questo un job fallito mostrava solo 'errore' sulla
+            # UI e lasciava il server log muto. La UI riceve `error` (tail) via SSE.
+            rec = self._jobs.get(job_id)
+            kind = rec.kind if rec else "?"
+            sess = rec.session_id if rec else "?"
+            print(
+                f"\n[jobs] JOB FAILED job_id={job_id} kind={kind} session={sess}\n{tb}",
+                file=sys.stderr,
+                flush=True,
+            )
             self._signal(job_id, status="failed", error=f"{exc}\n\n{tb[-500:]}")
         else:
             self._signal(
