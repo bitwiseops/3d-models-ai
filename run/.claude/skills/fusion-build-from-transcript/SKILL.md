@@ -319,8 +319,10 @@ per l'API `adsk` sottostante (es. `Joints add`/`JointInput`) usa il lookup della
 ### Render di verifica (pose canoniche, via execute_code)
 
 Unico uso ammesso di `execute_code`: dentro una chiamata, per ogni vista utile imposta
-`app.activeViewport.camera` con le pose canoniche `VIEW_CAMERA` di `src/fusion_build.py`
-(front=+Y, side=−X, back=−Y, three_quarter=iso; up=+Z), `viewport.fit()`, poi
+`app.activeViewport.camera` con le pose canoniche da `ViewSpec.fusion_camera` in
+`src/view_schema.py`. I build da transcript NON hanno una sessione Oggetti sorgente con un
+`view_schema`, quindi l'helper risolve lo schema **`LEGACY_2x2`** (le 4 viste:
+front=+Y, side=−X, back=−Y, three_quarter=iso; up=+Z). `viewport.fit()`, poi
 `saveAsImageFile(<png>, w, h)`. Apri il PNG con Read e giudica forma/simmetria rispetto ad
 `acceptance` e `expected_summary`. Per le firme `adsk` del render (`Camera.eye`/`target`/
 `upVector`, `Viewport.saveAsImageFile`) fai lookup nella doc locale se incerto.
@@ -357,7 +359,8 @@ Unico uso ammesso di `execute_code`: dentro una chiamata, per ogni vista utile i
 > 3. **Posiziona con `add_joint`** secondo `step.joints` e la mappa relazioni→joint. MAI trasformazioni
 >    assolute.
 > 4. **Dettagli**: `fillet`/`create_hole`/`shell`/extrude-cut/`boolean_operation`.
-> 5. Verifica via `execute_code`: render delle pose utili (`VIEW_CAMERA`), `viewport.fit()`,
+> 5. Verifica via `execute_code`: render delle pose utili (da `ViewSpec.fusion_camera` in
+>    `src/view_schema.py`, schema `LEGACY_2x2`), `viewport.fit()`,
 >    `saveAsImageFile(<png>,w,h)`; apri il PNG con Read e giudica forma/simmetria vs `acceptance` ed
 >    `expected_summary`.
 > 6. RIPETI fino a **3 tentativi**. A ogni retry: `undo`, oppure ri-quota (`set_parameter`/
@@ -394,7 +397,8 @@ Confronta l'output con ciò che il tutorial avrebbe prodotto, in modo **misurabi
    `proportion_error_pct`); `symmetry_dev_mm` per asse (specchiatura); `watertight` via `export_stl` +
    trimesh (e `body.isSolid`). Per le firme `adsk` (`BRepBody.boundingBox`, `BoundingBox3D`,
    `BRepBody.isSolid`) fai lookup nella doc locale se incerto.
-3. **Render 4 viste** dell'output (pose `VIEW_CAMERA`, via `execute_code`), salvate nei `views[...]`.
+3. **Render 4 viste** dell'output (pose da `ViewSpec.fusion_camera` in `src/view_schema.py`, schema
+   `LEGACY_2x2`, via `execute_code`), salvate nei `views[...]`.
 4. **Giudizio semantico** — lancia **un** subagent giudice (Sonnet) col template sotto: NON ci sono
    immagini di riferimento; il giudice confronta i 4 render con `expected_summary` + `manifest` →
    `views[].score` (quanto il modello corrisponde all'oggetto descritto) + `parts_check` +

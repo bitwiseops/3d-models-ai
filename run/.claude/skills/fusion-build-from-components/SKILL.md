@@ -347,8 +347,8 @@ relativo); ammesso solo come fallback ultimo documentato nelle `notes`.
 
 Convenzione di build: **up = +Z**. Render = unico uso di `execute_code`: per ogni vista imposta
 `app.activeViewport.camera`, `viewport.fit()`, poi `saveAsImageFile`. Le pose canoniche sono in
-`src/view_schema.py` (`ViewSpec.fusion_camera`), risolte dallo schema della sessione, e in
-`src/fusion_build.py` `VIEW_CAMERA` — **le stesse** negli step e nel gate. Le due viste 3/4 correnti:
+`src/view_schema.py` (`ViewSpec.fusion_camera`), risolte dallo schema della sessione — **le stesse**
+negli step e nel gate. Le due viste 3/4 correnti:
 
 | view      | view_dir      | up        | ortho |
 |-----------|---------------|-----------|-------|
@@ -388,7 +388,7 @@ lookup nella doc locale (§"Documentazione API locale").
 > 3. Se `step.joints` non è vuoto: **posiziona con `add_joint`** (mappa relazioni→joint) referenziando
 >    geometria stabile; verifica nelle **viste whole** che combaci l'assemblaggio. **NON** `move_body`.
 > 4. Verifica (via `execute_code`): rendi le `reference_views` con le pose canoniche (`fusion_camera`
->    dello schema / `VIEW_CAMERA`; front_3q=view_dir[1,1,-1], rear_3q=view_dir[-1,-1,-1], up=+Z),
+>    dello schema in `src/view_schema.py`; front_3q=view_dir[1,1,-1], rear_3q=view_dir[-1,-1,-1], up=+Z),
 >    `viewport.fit()`, `saveAsImageFile`; apri i png con Read e giudica forma/simmetria del componente
 >    (vs le sue viste) e, se ha joint, dell'assemblaggio (vs whole) rispetto ad `acceptance`.
 > 5. RIPETI fino a max 3 tentativi. A ogni retry: `undo`/ri-quota/riapri `.f3d`; poi ri-verifica.
@@ -425,7 +425,7 @@ il modello assemblato **sia col design whole-object sia con le immagini per-comp
    (`proportion_error_pct`), scarto di simmetria per asse (`symmetry_dev_mm`), `watertight` (export STL
    + trimesh e/o `body.isSolid`). Identiche a fusion-build.
 3. **Render delle viste whole** del modello assemblato (tutte quelle della sessione, pose canoniche
-   `fusion_camera`/`VIEW_CAMERA`; correnti front_3q/rear_3q) in `views[...]`, poi genera le lenti dei
+   `ViewSpec.fusion_camera` in `src/view_schema.py`; correnti front_3q/rear_3q) in `views[...]`, poi genera le lenti dei
    render:
    ```
    uv run python -m src.fusion_build_from_components make-lenses <build_dir> --iter N
