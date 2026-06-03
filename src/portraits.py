@@ -111,11 +111,15 @@ def _run_multi_view(
     (portrait_dir / "prompts" / "01_refined_multi.txt").write_text(refined, encoding="utf-8")
     update_metadata(portrait_dir, refined_prompt_multi=refined)
     print(f"[portraits] [multi] Meshy image-to-image (native multi-view)…")
-    task_id = meshy_client.image_to_image(
-        refined,
-        reference_image_urls=[ref_uri],
-        generate_multi_view=True,
+    task_id, used_key = meshy_client.create_with_failover(
+        lambda k: meshy_client.image_to_image(
+            refined,
+            reference_image_urls=[ref_uri],
+            generate_multi_view=True,
+            api_key=k,
+        ),
         api_key=api_key,
+        label="portrait-multi",
     )
     task = meshy_client.poll(
         "/image-to-image",
@@ -123,7 +127,7 @@ def _run_multi_view(
         label="portrait-multi",
         max_wait=600,
         on_progress=on_progress,
-        api_key=api_key,
+        api_key=used_key,
     )
     image_urls = task.get("image_urls") or []
     if not image_urls:
@@ -158,11 +162,15 @@ def _run_grid(
     (portrait_dir / "prompts" / "01_refined_grid.txt").write_text(refined, encoding="utf-8")
     update_metadata(portrait_dir, refined_prompt_grid=refined)
     print(f"[portraits] [grid] Meshy image-to-image (2x2 grid prompt)…")
-    task_id = meshy_client.image_to_image(
-        refined,
-        reference_image_urls=[ref_uri],
-        generate_multi_view=False,
+    task_id, used_key = meshy_client.create_with_failover(
+        lambda k: meshy_client.image_to_image(
+            refined,
+            reference_image_urls=[ref_uri],
+            generate_multi_view=False,
+            api_key=k,
+        ),
         api_key=api_key,
+        label="portrait-grid",
     )
     task = meshy_client.poll(
         "/image-to-image",
@@ -170,7 +178,7 @@ def _run_grid(
         label="portrait-grid",
         max_wait=600,
         on_progress=on_progress,
-        api_key=api_key,
+        api_key=used_key,
     )
     image_urls = task.get("image_urls") or []
     if not image_urls:
@@ -419,13 +427,17 @@ def generate_bust_3d(
         f"PBR={'on' if enable_pbr else 'off'}, poly={target_polycount//1000}k, "
         f"sym={symmetry_mode})…"
     )
-    task_id = meshy_client.multi_image_to_3d(
-        image_urls=image_urls,
-        target_formats=_BUST_TARGET_FORMATS,
-        enable_pbr=enable_pbr,
-        target_polycount=target_polycount,
-        symmetry_mode=symmetry_mode,
+    task_id, used_key = meshy_client.create_with_failover(
+        lambda k: meshy_client.multi_image_to_3d(
+            image_urls=image_urls,
+            target_formats=_BUST_TARGET_FORMATS,
+            enable_pbr=enable_pbr,
+            target_polycount=target_polycount,
+            symmetry_mode=symmetry_mode,
+            api_key=k,
+        ),
         api_key=api_key,
+        label=f"bust-3d-run-{run_id}",
     )
     update_metadata(portrait_dir, patch_bust_run={"run_id": run_id, "task_id": task_id})
 
@@ -435,7 +447,7 @@ def generate_bust_3d(
         label=f"bust-3d-run-{run_id}",
         max_wait=1800,
         on_progress=on_progress,
-        api_key=api_key,
+        api_key=used_key,
     )
 
     model_urls = task.get("model_urls", {})

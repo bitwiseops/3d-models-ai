@@ -56,19 +56,28 @@ OUTPUT
 - Una singola frase descrittiva densa, 40-80 parole, senza preamboli, senza virgolette, senza markdown, senza elenchi puntati."""
 
 
-# Staging block deterministico: layout 2x2, camera, lighting, sfondo, vincoli
-# fotografici. Costante — non viene riscritto da Claude ad ogni iterazione.
-# Il subject_block (variabile, raffinato da Claude) viene concatenato dopo.
+# Staging block deterministico: layout 1x2 a DUE viste three-quarter (front-¾ +
+# rear-¾), camera, lighting, sfondo, vincoli fotografici. Costante — non viene
+# riscritto da Claude ad ogni iterazione. Il subject_block (variabile, raffinato
+# da Claude) viene concatenato dopo.
+#
+# Perché due 3/4 e non più il 2x2 con viste ortogonali pure (side 90° / back
+# 180°): le viste ortogonali pure perdono profondità e il modello image-to-3D
+# inventava geometria diversa cella per cella → ricostruzioni piatte/incoerenti.
+# Due viste 3/4 (fronte+fianco / retro+fianco opposto) coprono quasi tutta la
+# superficie con forti indizi di profondità e sono più facili da mantenere
+# coerenti tra loro. (Layout/angoli canonici in src/view_schema.OBJECT_VIEWS.)
 OBJECT_GRID_STAGING_BLOCK = (
-    "Studio product photography composed as a 2x2 grid on a square 1:1 canvas "
-    "(~2048x2048), four equal cells separated by a thin gutter the exact color "
-    "of the background; top-left is a near-frontal view tilted ~15 degrees off "
-    "axis, top-right is the same object rotated 45 degrees clockwise around the "
-    "vertical axis (three-quarter view), bottom-left is a pure 90-degree side "
-    "profile with the left flank toward the camera, bottom-right is a pure 180-"
-    "degree rear view (not a three-quarter from behind); identical scale, "
-    "camera height, distance, lighting, background and materials across all four "
-    "cells, bases aligned on the same horizontal line, the subject occupying "
+    "Studio product photography composed as a 1x2 horizontal layout on a 16:9 "
+    "canvas (~2048x1152), two equal cells side by side separated by a thin "
+    "vertical gutter the exact "
+    "color of the background; the LEFT cell is a front three-quarter view with "
+    "the object rotated ~35 degrees around the vertical axis so its front face "
+    "and one flank are both clearly visible, tilted ~10 degrees downward; the "
+    "RIGHT cell is a rear three-quarter view of the SAME object rotated ~215 "
+    "degrees so its back face and the opposite flank are both visible, at "
+    "identical scale, camera height, distance, lighting, background and "
+    "materials, bases aligned on the same horizontal line, the subject occupying "
     "~70-80% of each cell, fully visible, never cropped. Long-tele lens "
     "85-135mm equivalent to minimize perspective distortion, pure white "
     "(#FFFFFF) or very light neutral-grey seamless studio background with no "
@@ -76,17 +85,19 @@ OBJECT_GRID_STAGING_BLOCK = (
     "(soft key + fill + gentle rim), only very faint contact shadows, no hard "
     "cast shadows on background or under the object (hard shadows are read as "
     "geometry by the 3D reconstructor); neutral exposure, no DOF, no bokeh, no "
-    "motion blur, no dutch tilt, no lens flare, no vignette. No labels, "
-    "captions, arrows, numbers, watermarks, decorative borders. The image will "
-    "be split into 4 separate views and fed to a multi-image-to-3D model as a "
-    "blueprint for 3D printing. Subject:"
+    "motion blur, no dutch tilt, no lens flare, no vignette. Both cells must "
+    "depict exactly the same object with consistent geometry, proportions, "
+    "colors and details. No labels, captions, arrows, numbers, watermarks, "
+    "decorative borders. The image will be split into 2 separate three-quarter "
+    "views and fed to a multi-image-to-3D model as a blueprint for 3D printing. "
+    "Subject:"
 )
 
 
 OBJECT_GRID_SYSTEM_PROMPT = """Sei un prompt-engineer specializzato nella DESCRIZIONE DEL SOGGETTO per immagini blueprint image-to-3D di OGGETTI stampabili.
 
 CONTESTO PIPELINE (non scrivere nulla a riguardo)
-Il tuo output verrà concatenato DOPO un blocco "staging" fisso che già definisce: layout 2x2 grid, 4 angoli di camera (front / three-quarter / side / back), studio neutro, lighting, lens, esclusioni di DOF / bokeh / ombre dure, etc. Quindi NON descrivere layout, griglia, camera, lighting, sfondo, lens, esposizione: sono GIÀ specificati. Limitati al SOGGETTO.
+Il tuo output verrà concatenato DOPO un blocco "staging" fisso che già definisce: layout 1x2 a DUE viste three-quarter (front-¾ + rear-¾), studio neutro, lighting, lens, esclusioni di DOF / bokeh / ombre dure, etc. Quindi NON descrivere layout, griglia, camera, lighting, sfondo, lens, esposizione: sono GIÀ specificati. Limitati al SOGGETTO.
 
 COSA DEVI SCRIVERE
 Una descrizione fisica densa e tangibile dell'oggetto che l'utente vuole, focalizzata su:
@@ -109,7 +120,7 @@ EVITA decorazioni 2D piatte (testi grandi, loghi, decal) sulla superficie: verre
 OUTPUT
 - Rispondi SOLO con la descrizione del soggetto in INGLESE.
 - Una singola frase densa, 70-120 parole, senza preamboli, senza virgolette, senza markdown, senza elenchi puntati.
-- NON ripetere parole come "2x2 grid", "front view", "three-quarter", "side", "back", "studio background", "white background", "soft lighting", "85mm lens": appartengono allo staging e sarebbero duplicate.
+- NON ripetere parole come "three-quarter", "front", "rear", "1x2", "two views", "studio background", "white background", "soft lighting", "85mm lens": appartengono allo staging e sarebbero duplicate.
 - Inizia direttamente con il soggetto (es. "A squat ceramic teapot ..." NON "An image showing a teapot ..." né "The subject is ...").
 - Termina con un punto."""
 
@@ -445,8 +456,10 @@ def refine_with_feedback(
 #  1) proposer: dato il subject + l'immagine del design, propone l'inventario dei
 #     componenti (JSON), con relazioni di accoppiamento tra loro;
 #  2) refiner per-pezzo: per ogni componente produce un prompt Meshy COMPLETO
-#     (subject + staging 2x2), così l'immagine di ciascun componente è una grid
-#     a 4 viste riutilizzabile dal parser a valle (skill fusion-build-from-components).
+#     (subject + staging 1x2 due 3/4), così l'immagine di ciascun componente è una
+#     griglia a 2 viste riutilizzabile dal parser a valle (skill
+#     fusion-build-from-components). L'immagine del componente è generata in
+#     image-to-image usando le viste del whole-object come reference.
 # Il vocabolario delle relazioni è IDENTICO al PART-MANIFEST della pipeline Fusion
 # (attached_to / on_top_of / inside / concentric_with / flush_with / symmetric_to),
 # così il mapping componenti→manifest a valle è quasi meccanico.
@@ -454,7 +467,7 @@ def refine_with_feedback(
 COMPONENT_PROPOSER_SYSTEM_PROMPT = """Sei un ingegnere di prodotto che scompone un oggetto in COMPONENTI fisici stampabili e assemblabili separatamente, per una pipeline di modellazione CAD parametrica (Fusion 360).
 
 CONTESTO
-Ricevi la descrizione di un oggetto (subject) e la sua immagine di design (una grid 2x2 con 4 viste: front / three-quarter / side / back). Devi identificare i PEZZI distinti che lo compongono: parti che, in una costruzione CAD reale, verrebbero modellate come corpi/componenti separati e poi assemblate con vincoli (joints).
+Ricevi la descrizione di un oggetto (subject) e la sua immagine di design (una griglia 1x2 con DUE viste three-quarter: front-¾ a sinistra, rear-¾ a destra). Le due viste 3/4 mostrano fronte+fianco e retro+fianco opposto: usale insieme per inferire la geometria 3D completa. Devi identificare i PEZZI distinti che lo compongono: parti che, in una costruzione CAD reale, verrebbero modellate come corpi/componenti separati e poi assemblate con vincoli (joints).
 
 COSA È UN COMPONENTE
 - Un volume coeso, funzionalmente o geometricamente distinto (es. corpo, coperchio, manico, beccuccio, base, tappo, ghiera, perno).
@@ -499,7 +512,9 @@ REGOLE
 COMPONENT_REFINER_SYSTEM_PROMPT = """Sei un prompt-engineer specializzato nella DESCRIZIONE DEL SOGGETTO per immagini blueprint image-to-3D, qui applicato a UN SINGOLO COMPONENTE di un oggetto più grande.
 
 CONTESTO PIPELINE (non scrivere nulla a riguardo)
-Il tuo output verrà concatenato DOPO un blocco "staging" fisso che già definisce: layout 2x2 grid, 4 angoli di camera (front / three-quarter / side / back), studio neutro, lighting, lens, esclusioni di DOF / bokeh / ombre dure, etc. Quindi NON descrivere layout, griglia, camera, lighting, sfondo, lens, esposizione: sono GIÀ specificati. Limitati al SOGGETTO, che qui è il SINGOLO componente isolato.
+Il tuo output verrà concatenato DOPO un blocco "staging" fisso che già definisce: layout 1x2 a DUE viste three-quarter (front-¾ + rear-¾), studio neutro, lighting, lens, esclusioni di DOF / bokeh / ombre dure, etc. Quindi NON descrivere layout, griglia, camera, lighting, sfondo, lens, esposizione: sono GIÀ specificati. Limitati al SOGGETTO, che qui è il SINGOLO componente isolato.
+
+IMPORTANTE: l'immagine del componente verrà generata in TEXT-TO-IMAGE dalla tua sola descrizione (il modello NON vede l'oggetto intero). Tu invece HAI sott'occhio il design whole-object: descrivi il pezzo ISOLATO ma FEDELE a come appare lì (stessa forma/scala/materiale/colore), così resta coerente col tutto. Devi quindi essere molto esplicito e tangibile su materiale, colore e proporzioni, perché sono l'unico ancoraggio alla coerenza col resto.
 
 COSA DEVI SCRIVERE
 Una descrizione fisica densa e tangibile del SOLO componente indicato, come apparirebbe ISOLATO sul tavolo dello studio (staccato dal resto dell'oggetto), focalizzata su:
@@ -523,7 +538,7 @@ EVITA materiali altamente riflettenti/trasparenti/subsurface (vetro liscio, acqu
 OUTPUT
 - Rispondi SOLO con la descrizione del componente in INGLESE.
 - Una singola frase densa, 70-120 parole, senza preamboli, senza virgolette, senza markdown, senza elenchi puntati.
-- NON ripetere parole come "2x2 grid", "front view", "three-quarter", "side", "back", "studio background", "white background", "soft lighting", "85mm lens": appartengono allo staging.
+- NON ripetere parole come "three-quarter", "front", "rear", "1x2", "two views", "studio background", "white background", "soft lighting", "85mm lens": appartengono allo staging.
 - Inizia direttamente con il componente (es. "A squat ceramic teapot body ..." NON "The component is ...").
 - Termina con un punto."""
 
@@ -559,7 +574,7 @@ def propose_components(prompt: str, design_image: Path) -> dict:
             "text": (
                 f"Oggetto da scomporre (descrizione del soggetto):\n{subject}\n\n"
                 "L'immagine qui sotto è il design accettato dell'oggetto intero "
-                "(grid 2x2: front / three-quarter / side / back). Identifica i "
+                "(griglia 1x2: front-¾ a sinistra, rear-¾ a destra). Identifica i "
                 "componenti fisici come da regole del system e rispondi SOLO col JSON."
             ),
         },
@@ -608,10 +623,11 @@ def refine_component(
         f"- interface: {component.get('interface', '')}\n"
         f"relazioni di accoppiamento:\n{rel_summary}\n\n"
         f"Altri componenti (fratelli) dell'oggetto:\n{siblings_summary}\n\n"
-        "L'immagine qui sotto è il design dell'oggetto INTERO (grid 2x2). "
-        "Scontorna mentalmente SOLO il componente indicato e descrivilo isolato, "
-        "mantenendo scala/stile/materiale coerenti col tutto ed esplicitando la "
-        "geometria dell'interfaccia di accoppiamento. Stesse regole del system."
+        "L'immagine qui sotto è il design dell'oggetto INTERO (griglia 1x2: "
+        "front-¾ + rear-¾). Scontorna mentalmente SOLO il componente indicato e "
+        "descrivilo isolato, FEDELE a come appare nel design (stessa "
+        "scala/stile/materiale/colore), ed esplicitando la geometria "
+        "dell'interfaccia di accoppiamento. Stesse regole del system."
     )
     if feedback:
         text += f"\n\nFeedback dell'utente sull'ultima versione del componente: {feedback}"

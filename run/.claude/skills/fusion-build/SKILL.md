@@ -1,15 +1,21 @@
 ---
 name: fusion-build
-description: Costruisce in modo INCREMENTALE un modello 3D PARAMETRICO in Fusion 360 (live, via MCP) a partire dalla descrizione + 4 viste di una sessione Oggetti esistente. Copia-e-adatta della pipeline blender-build con backend CAD = Fusion: stesso flusso (parsing → manifest → piano → esecuzione → gate), ma la geometria è B-rep ESATTA per costruzione (sketch → extrude/revolve, NON mesh) e il posizionamento tra le parti si realizza con JOINTS/vincoli (coincident, concentric, flush), NON con trasformazioni assolute. Parte in AUTO MODE all'invocazione. Prima un parser Opus (subagent, sola percezione, niente MCP) estrae un PART-MANIFEST — l'inventario di COSA deve esistere (parti, primitive, relazioni); è la single source of truth. Poi un planner Opus (thinking medio) crea il piano focalizzato su GEOMETRIA e SIMMETRIA, ed executor Sonnet in sequenza applicano ogni step orchestrando i tool CAD granulari del server MCP (sketch/extrude/revolve/joint/export), usando `execute_code` solo per render della viewport (saveAsImageFile) e lettura bbox, ripetendo fino a 3 volte, e salvano uno snapshot .f3d per modifica. Termina con un GATE DI CONVERGENZA che confronta input↔output e raccomanda in modo deterministico stop o re-iterazione. USARE quando l'utente chiede di "costruire/modellare in Fusion (360)" un oggetto da una sessione esistente. PRECONDIZIONE: Fusion 360 aperto su macOS/Windows, add-in MCP abilitato e server raggiungibile (setup in `run/README.md`).
+description: Costruisce in modo INCREMENTALE un modello 3D PARAMETRICO in Fusion 360 (live, via MCP) a partire dalla descrizione + 2 viste 3/4 (front_3q, rear_3q) di una sessione Oggetti esistente. Copia-e-adatta della pipeline blender-build con backend CAD = Fusion: stesso flusso (parsing → manifest → piano → esecuzione → gate), ma la geometria è B-rep ESATTA per costruzione (sketch → extrude/revolve, NON mesh) e il posizionamento tra le parti si realizza con JOINTS/vincoli (coincident, concentric, flush), NON con trasformazioni assolute. Parte in AUTO MODE all'invocazione. Prima un parser Opus (subagent, sola percezione, niente MCP) estrae un PART-MANIFEST — l'inventario di COSA deve esistere (parti, primitive, relazioni); è la single source of truth. Poi un planner Opus (thinking medio) crea il piano focalizzato su GEOMETRIA e SIMMETRIA, ed executor Sonnet in sequenza applicano ogni step orchestrando i tool CAD granulari del server MCP (sketch/extrude/revolve/joint/export), usando `execute_code` solo per render della viewport (saveAsImageFile) e lettura bbox, ripetendo fino a 3 volte, e salvano uno snapshot .f3d per modifica. Termina con un GATE DI CONVERGENZA che confronta input↔output e raccomanda in modo deterministico stop o re-iterazione. USARE quando l'utente chiede di "costruire/modellare in Fusion (360)" un oggetto da una sessione esistente. PRECONDIZIONE: Fusion 360 aperto su macOS/Windows, add-in MCP abilitato e server raggiungibile (setup in `run/README.md`).
 ---
 
 # fusion-build — costruzione 3D parametrica incrementale live in Fusion 360
 
 Pipeline a **più stadi** orchestrata da Claude Code (questo agente) sui **tool CAD granulari** del
 server MCP Fusion (faust-machines): **parsing → piano → esecuzione → chiusura → gate**. Input: una
-sessione Oggetti esistente (`outputs/<ts-slug>/`) con prompt raffinato + i 4 crop del grid 2x2
-(front / three_quarter / side / back). Output: modello Fusion **parametrico** (B-rep) costruito
-incrementalmente, con storico `.f3d` per ogni modifica.
+sessione Oggetti esistente (`outputs/<ts-slug>/`) con prompt raffinato + i crop delle viste della
+griglia (attualmente **2 viste 3/4** — `front_3q`, `rear_3q` — layout 1x2). Output: modello Fusion
+**parametrico** (B-rep) costruito incrementalmente, con storico `.f3d` per ogni modifica.
+
+> **Numero/nomi delle viste = quelli reali della sessione.** Non assumere un numero fisso: leggi i
+> nomi effettivi da `metadata['views']` e itera sui file `refs/*.png` (oppure su ciò che ti
+> restituiscono gli helper CLI `eval-paths`/`make-lenses`/`inputs`). Le sessioni Oggetti **nuove**
+> hanno 2 viste 3/4 (`front_3q`, `rear_3q`); **sessioni vecchie possono avere ancora 4 viste**
+> (schema legacy `front/three_quarter/side/back`) — leggi i nomi reali, non cablarli.
 
 > **Copia-e-adatta di `blender-build`.** Il flusso e la logica CAD-agnostica (parsing →
 > PART-MANIFEST SSOT → piano → executor in sequenza → gate deterministico) sono gli stessi:
@@ -104,8 +110,9 @@ viste in una sola vista vengano "dimenticate" durante la pianificazione.
    ```
    uv run python -m src.fusion_build init <source_dir>
    ```
-   → ritorna `{"build_dir": "outputs/fusion/<ts-slug>"}`. Copia già le 4 viste in
-   `refs/`, scrive `prompts/00_source.txt` e `metadata.json` (**status=parsing**).
+   → ritorna `{"build_dir": "outputs/fusion/<ts-slug>"}`. Copia già le viste della sessione in
+   `refs/` (i file `refs/*.png`, i cui nomi sono in `metadata['views']`), scrive
+   `prompts/00_source.txt` e `metadata.json` (**status=parsing**).
    **Genera anche le LENTI percettive** di ogni vista in `refs/lenses/<view>__{edges,
    silhouette,color}.png` (mappa in `metadata.ref_lenses`) — varianti filtrate che il
    parser legge ACCANTO all'originale per descrivere l'oggetto con più accuratezza
@@ -113,9 +120,9 @@ viste in una sola vista vengano "dimenticate" durante la pianificazione.
    refs aggiornate), rigenerale con `uv run python -m src.fusion_build make-lenses <build_dir>`.
 2. Lancia **un** subagent **parser** con il tool **Agent**:
    - `subagent_type: general-purpose`, `model: opus` — **sola percezione**: gli servono solo
-     `Read` (le 4 viste) e `Write` (il manifest). **NIENTE MCP / niente Fusion** in questo stadio.
+     `Read` (le viste in `refs/`) e `Write` (il manifest). **NIENTE MCP / niente Fusion** in questo stadio.
    - prompt = **template parser** sotto, con la descrizione (`prompts/00_source.txt`) e i path
-     delle 4 viste `refs/<view>.png`.
+     delle viste `refs/*.png` (i nomi reali da `metadata['views']`).
 3. Salva il manifest prodotto dal parser (porta lo stato `parsing → planning`):
    ```
    uv run python -m src.fusion_build save-manifest <build_dir> <manifest.json>
@@ -136,7 +143,7 @@ vocabolario di blender-build): l'executor lo mappa al modo di costruzione Fusion
       "parameters": {"shape": "tronco-conico", "proportions": "altezza ~1.5x larghezza"},
       "relations": [{"type": "attached_to|on_top_of|inside|concentric_with|flush_with|symmetric_to", "target_id": "base", "detail": "centrato"}],
       "details": ["scanalatura orizzontale a metà altezza", "raccordo 2 mm sul bordo superiore"],
-      "source_views": ["front", "side"],
+      "source_views": ["front_3q", "rear_3q"],
       "confidence": "high|medium|low"
     }
   ],
@@ -147,11 +154,13 @@ vocabolario di blender-build): l'executor lo mappa al modo di costruzione Fusion
 ### Template prompt per il parser (Opus, sola percezione)
 
 > Sei un analista percettivo. NON modelli nulla: il tuo unico compito è produrre l'**inventario
-> strutturato** delle parti di un oggetto a partire dalla sua descrizione e da 4 viste ortogonali
-> (front / three_quarter / side / back). Niente CAD, niente codice: solo osservazione.
+> strutturato** delle parti di un oggetto a partire dalla sua descrizione e dalle viste che ti
+> vengono fornite (i file `refs/*.png`; per le sessioni Oggetti nuove sono **2 viste 3/4** —
+> `front_3q` = fronte + un fianco, `rear_3q` = retro + fianco opposto). Niente CAD, niente codice:
+> solo osservazione.
 >
 > DESCRIZIONE: {prompts/00_source.txt}
-> VISTE ORIGINALI (aprile tutte con Read): {refs/front.png, refs/three_quarter.png, refs/side.png, refs/back.png}
+> VISTE ORIGINALI (aprile tutte con Read): {refs/front_3q.png, refs/rear_3q.png}
 > LENTI per ogni vista (aprile con Read accanto all'originale): {refs/lenses/<view>__edges.png,
 >   refs/lenses/<view>__silhouette.png, refs/lenses/<view>__color.png} — i path esatti sono in
 >   `metadata.ref_lenses`. Sono varianti FILTRATE della STESSA vista, non parti nuove.
@@ -191,8 +200,9 @@ Il planner **consuma il manifest** (§1) come SSOT: ogni parte del manifest deve
 da almeno uno step. NON re-inventare l'inventario dalle immagini — le viste servono solo per
 capire *come* realizzare le parti già elencate.
 
-1. Leggi `manifest.json` e la descrizione, e **guarda le 4 viste** (`Read` su `refs/front.png`,
-   `three_quarter.png`, `side.png`, `back.png`) per pianificare con il contesto visivo.
+1. Leggi `manifest.json` e la descrizione, e **guarda tutte le viste** (`Read` su ogni `refs/*.png`
+   — i nomi reali sono in `metadata['views']`; per le sessioni nuove `refs/front_3q.png`,
+   `refs/rear_3q.png`) per pianificare con il contesto visivo.
 2. Produci il **piano**: decomposizione in step ordinati **coarse → fine**, ognuno
    espresso con il **paradigma parametrico di Fusion** (vedi Toolbox). Ogni step dichiara in
    `manifest_parts` gli `id` delle parti del manifest che realizza. Scrivi il piano in un file
@@ -218,7 +228,7 @@ capire *come* realizzare le parti già elencate.
          "fusion_approach": "Sketch su piano XY (profilo metà-sezione) → REVOLVE attorno all'asse Z; design parametrico, quote in cm; Mirror feature se serve simmetria bilaterale",
          "features": ["sketch", "revolve", "fillet"],
          "joints": [],
-         "reference_views": ["front", "side"],
+         "reference_views": ["front_3q", "rear_3q"],
          "depends_on": [],
          "acceptance": "silhouette frontale e laterale combaciano; corpo di rivoluzione attorno a Z; proporzioni ~1.5x altezza"
        }
@@ -264,7 +274,8 @@ Per ogni step in ordine:
    - `model: sonnet`
    - prompt = **template executor** sotto, con piano completo, step corrente, **le parti del
      manifest citate in `step.manifest_parts`** (estratte da `manifest.json`), i path delle
-     viste di riferimento (`<build_dir>/refs/<view>.png`), e i path artefatti dello step.
+     viste di riferimento (`<build_dir>/refs/<view>.png`, i `<view>` da `step.reference_views`),
+     e i path artefatti dello step.
 
 > **L'executor orchestra una SEQUENZA di chiamate granulari** (una operazione per chiamata, in
 > ordine), NON scrive uno script `adsk.*`. Sequenza tipo per uno step (firme parametri
@@ -321,16 +332,24 @@ ultimo ed **esplicitamente documentato** nelle `notes` del record.
 ### Render di verifica (pose ESATTE delle viste di riferimento)
 
 Per restare apples-to-apples col gate, riproduci le **stesse pose** dei ref. Convenzione di build:
-**up = +Z, "fronte" rivolto verso −Y**. Il render è l'**unico** uso ammesso di
-`mcp__fusion__execute_code`: dentro una chiamata `execute_code`, per ogni vista in `reference_views`
-imposta `app.activeViewport.camera` (`eye`/`target`/`upVector`; `cameraType` ortografica per
-front/right/back, isometrica fissa per three_quarter), `camera.isFitView = True` (o
-`viewport.fit()`), riassegna `viewport.camera = camera`, poi
-`viewport.saveAsImageFile(<png>, w, h)`. Le direzioni canoniche (verso di sguardo eye→target) sono
-in `src/fusion_build.py` `VIEW_CAMERA` (front=+Y, side=−X, back=−Y, three_quarter=iso) — usa
-**le stesse** negli step e nel gate, così i render combaciano con `refs/`. Per le firme `adsk`
-del render (`Camera.eye`/`target`/`upVector`, `Viewport.saveAsImageFile`) fai lookup nella doc
-locale se incerto (§"Documentazione API locale").
+**up = +Z**. Il render è l'**unico** uso ammesso di `mcp__fusion__execute_code`: dentro una chiamata
+`execute_code`, per ogni vista in `reference_views` imposta `app.activeViewport.camera`
+(`eye`/`target`/`upVector` derivati dalla posa canonica della vista), `camera.isFitView = True`
+(o `viewport.fit()`), riassegna `viewport.camera = camera`, poi
+`viewport.saveAsImageFile(<png>, w, h)`. Le pose canoniche di ogni vista vivono in
+`src/view_schema.py` → `ViewSpec.fusion_camera` (`{view_dir, up, ortho}`); l'helper
+`src/fusion_build.py` le risolve per la sessione (incluso il fallback legacy). Per le viste 3/4
+delle sessioni Oggetti nuove (up=+Z per tutte):
+
+| vista      | view_dir        | up        | ortho | descrizione                          |
+|------------|-----------------|-----------|-------|--------------------------------------|
+| `front_3q` | `[1, 1, -1]`    | `[0,0,1]` | False | isometrica frontale (fronte + fianco)|
+| `rear_3q`  | `[-1, -1, -1]`  | `[0,0,1]` | False | isometrica posteriore (retro + fianco opposto)|
+
+(Sessioni **legacy** a 4 viste: `front=+Y`, `side=−X`, `back=−Y` ortografiche, `three_quarter=iso`;
+il fallback nell'helper le gestisce.) Usa **le stesse** pose negli step e nel gate, così i render
+combaciano con `refs/`. Per le firme `adsk` del render (`Camera.eye`/`target`/`upVector`,
+`Viewport.saveAsImageFile`) fai lookup nella doc locale se incerto (§"Documentazione API locale").
 
 ### Template prompt per l'executor (Sonnet)
 
@@ -347,8 +366,8 @@ locale se incerto (§"Documentazione API locale").
 > PIANO COMPLETO (contesto): {plan.json}
 > STEP DA APPLICARE: {step}
 > PARTI DEL MANIFEST DA REALIZZARE (single source of truth — costruisci QUESTE): {parts di step.manifest_parts}
-> VISTE DI RIFERIMENTO: {refs/front.png, ...} (apri quelle in step.reference_views — servono solo
->   al CHECK VISIVO della forma, NON per inventare feature non presenti nel manifest)
+> VISTE DI RIFERIMENTO: {refs/<view>.png per ogni <view> in step.reference_views — es. refs/front_3q.png,
+>   refs/rear_3q.png} (servono solo al CHECK VISIVO della forma, NON per inventare feature non presenti nel manifest)
 > PATH ARTEFATTI (assoluti, usali esattamente): f3d={...} stl={...} png={...} json={...}
 >
 > VINCOLI HARD (non violarli):
@@ -375,10 +394,11 @@ locale se incerto (§"Documentazione API locale").
 > 4. **Dettagli** dello step → feature native: **`fillet`** (raccordi), **`create_hole`** (fori),
 >    extrude-cut (scanalature), **`shell`** (cavità), `boolean_operation` per join/cut. Niente mesh.
 > 5. Verifica (via `execute_code`): per ogni vista in `reference_views` imposta la camera con la posa
->    canonica (`VIEW_CAMERA`: front=+Y, side=−X, back=−Y, three_quarter=iso; up=+Z), `viewport.fit()`,
->    poi `app.activeViewport.saveAsImageFile(<png>, w, h)`. Apri il png con Read e giudica **forma
->    e simmetria** (silhouette, proporzioni, simmetria) rispetto alla vista di riferimento e ad
->    `acceptance` — NON il colore/materiale.
+>    canonica della vista (da `ViewSpec.fusion_camera` in `src/view_schema.py` — per le sessioni nuove
+>    `front_3q`=view_dir[1,1,-1]/ortho False, `rear_3q`=view_dir[-1,-1,-1]/ortho False; up=+Z per
+>    tutte), `viewport.fit()`, poi `app.activeViewport.saveAsImageFile(<png>, w, h)`. Apri il png con
+>    Read e giudica **forma e simmetria** (silhouette, proporzioni, simmetria) rispetto alla vista di
+>    riferimento `refs/<view>.png` e ad `acceptance` — NON il colore/materiale.
 > 6. RIPETI fino a un **massimo di 3 tentativi** finché il risultato non è soddisfacente
 >    (soddisfacente = silhouette/simmetria combaciano con le `reference_views` e `acceptance` è
 >    rispettata). A ogni retry: `undo` dell'ultima operazione, oppure ri-quota
@@ -412,7 +432,7 @@ Export fatti, **NON** riassumere ancora: prosegui col **gate di convergenza (§5
 > cambia solo *come* si calcolano le metriche (API Fusion in cm) e *come* si rendono le viste
 > (`saveAsImageFile`).
 
-Step finale **ingegneristico**: confronta gli input (descrizione + 4 viste `refs/` + manifest)
+Step finale **ingegneristico**: confronta gli input (descrizione + viste `refs/*.png` + manifest)
 con l'output (il modello, ancora nel documento dopo la chiusura) in modo **misurabile** e decide
 se fermarsi o ri-partire dal risultato. Confronto **ibrido**: metriche oggettive + **copertura
 del manifest** + giudizio visivo per-vista, **focalizzato su geometria e simmetria** (NON colore).
@@ -421,8 +441,9 @@ del manifest** + giudizio visivo per-vista, **focalizzato su geometria e simmetr
    ```
    uv run python -m src.fusion_build eval-paths <build_dir>
    ```
-   → `{"iteration": N, "views": {front,three_quarter,side,back → png assoluti}, "verdict": "...abs..."}`
-   (tutto sotto `eval/iter_NN/`).
+   → `{"iteration": N, "views": {<view> → png assoluti, per ogni vista della sessione — es.
+   front_3q, rear_3q}, "verdict": "...abs..."}` (tutto sotto `eval/iter_NN/`). **Itera sulle viste
+   che l'helper restituisce** (l'insieme è già quello corretto della sessione), non su un elenco fisso.
 2. **Metriche oggettive in Fusion** (numeri, non occhio):
    - bbox del modello: **SOLO via `execute_code`** (`body.boundingBox` / bbox del component, in
      **cm**) → ×10 = **mm** vs `target_mm` (quote-target dal prompt/`strategy`, es. 89×130×3) →
@@ -434,8 +455,10 @@ del manifest** + giudizio visivo per-vista, **focalizzato su geometria e simmetr
      (centro di massa) come supporto e `measure_distance` per check puntuali.
    - `watertight`: esporta STL (`export_stl`) e verificalo con trimesh (come blender-build) e/o
      riporta la validità del solido B-rep (`body.isSolid`, via `execute_code`).
-3. **Render pulito delle 4 viste** del modello (via `execute_code`): pose canoniche `VIEW_CAMERA`
-   (front=+Y, side=−X, back=−Y, three_quarter=iso; up=+Z), ortografica per front/right/back,
+3. **Render pulito di tutte le viste** del modello (via `execute_code`), una per ogni vista
+   restituita da `eval-paths`: pose canoniche da `ViewSpec.fusion_camera` (`src/view_schema.py`; per
+   le sessioni nuove `front_3q`=view_dir[1,1,-1], `rear_3q`=view_dir[-1,-1,-1], entrambe ortho False;
+   up=+Z; il fallback legacy gestisce front/side/back ortografiche + three_quarter iso),
    `viewport.fit()`, poi `saveAsImageFile` salvando in `views[...]` di `eval-paths`. **Stesse pose**
    usate negli step. Poi **genera le lenti dei render** (per confronto omogeneo con le ref):
    ```
@@ -471,7 +494,7 @@ Schema `verdict.json`:
               "watertight": true},
   "parts_check": [{"id":"body","present":true,"relations_ok":true,"notes":"ok"},
                   {"id":"handle","present":false,"relations_ok":false,"notes":"manca del tutto"}],
-  "views": [{"view":"front","score":92,"notes":"..."}, {"view":"side","score":88,"notes":"..."}],
+  "views": [{"view":"front_3q","score":92,"notes":"..."}, {"view":"rear_3q","score":88,"notes":"..."}],
   "overall_score": 90,
   "actionable_gaps": ["bordo inferiore ~2 mm troppo spesso vs ref", "manca la maniglia (part handle)"]
 }
@@ -494,13 +517,14 @@ Schema `verdict.json`:
 > GEOMETRICHE concrete e correggibili (es. "bordo inferiore troppo spesso", "manca la parte handle",
 > "spigolo non raccordato"), non estetiche.
 >
-> VISTE (render ↔ ref, con lenti): {front: <render> + <eval/iter_NN/lenses/front__{edges,silhouette}.png>
->   ↔ <refs/front.png> + <refs/lenses/front__{edges,silhouette}.png>, ...}
+> VISTE (per ogni vista: render ↔ ref, con lenti): {<view>: <render> +
+>   <eval/iter_NN/lenses/<view>__{edges,silhouette}.png> ↔ <refs/<view>.png> +
+>   <refs/lenses/<view>__{edges,silhouette}.png>, ... — es. front_3q, rear_3q}
 > MANIFEST (parti attese): {manifest.json}
 > METRICHE OGGETTIVE (contesto): {bbox_mm, target_mm, symmetry_dev_mm, watertight}
 >
-> RITORNA come testo finale SOLO questo JSON:
-> `{"views":[{"view":"front","score":N,"notes":"..."}, ...],
+> RITORNA come testo finale SOLO questo JSON (una entry per ogni vista ricevuta):
+> `{"views":[{"view":"front_3q","score":N,"notes":"..."}, ...],
 >   "parts_check":[{"id":"...","present":true|false,"relations_ok":true|false,"notes":"..."}, ...],
 >   "overall_score":N, "actionable_gaps":["...", "..."]}`
 > dove `overall_score` è la tua sintesi pesata (penalizza forte gli errori di proporzione e
@@ -628,8 +652,10 @@ aggiornare l'auto-memory fuori repo: la fonte canonica è il file in `run/`.
   nome snake_case del tool.
 - **Riferimenti stabili**: per joints/feature usa geometria nominata (piani-feature / facce /
   spigoli), non indici di facce volatili che cambiano alla rigenerazione.
-- **Diagnostica**: rendi le 4 pose canoniche (front/side/back ortografiche + 3/4 iso),
-  `viewport.fit()`, e itera i parametri GUARDANDO i render salvati con `saveAsImageFile`.
+- **Diagnostica**: rendi le pose canoniche di ogni vista della sessione (da `ViewSpec.fusion_camera`
+  in `src/view_schema.py`; per le sessioni nuove le 2 viste 3/4 `front_3q`/`rear_3q` isometriche,
+  per il legacy front/side/back ortografiche + 3/4 iso), `viewport.fit()`, e itera i parametri
+  GUARDANDO i render salvati con `saveAsImageFile`.
 - **Focus = geometria e simmetria, non materiali/colori.** Spendi i tentativi su silhouette,
   proporzioni e simmetria, non sull'estetica. Materiali/colori sono rifinitura finale opzionale.
 

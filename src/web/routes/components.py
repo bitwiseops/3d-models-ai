@@ -2,7 +2,8 @@
 
 Stadio post-accettazione della pipeline Oggetti: l'oggetto viene scomposto in
 componenti (vedi workflow.breakdown_into_components), ognuno con un prompt
-context-aware e una grid 2x2. L'output è il bundle components/components.json
+context-aware e le proprie viste 3/4 (text-to-image; il prompt è scritto
+guardando il design intero). L'output è il bundle components/components.json
 letto poi dalla skill PC `fusion-build-from-components`.
 """
 from __future__ import annotations

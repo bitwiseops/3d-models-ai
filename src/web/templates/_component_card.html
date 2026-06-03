@@ -1,12 +1,11 @@
-{# Card di un singolo componente: 4 viste, stato, approva, rigenera.
-   Renderizzato dentro _components_cards.html (loop) o swappato da solo
-   dall'endpoint /approve. #}
-{% set grid_labels = {'front': 'Front', 'three_quarter': '3/4', 'side': 'Side', 'back': 'Back'} %}
+{# Card di un singolo componente: le sue viste (2 o 4 a seconda dello schema),
+   stato, approva, rigenera. Renderizzato dentro _components_cards.html (loop) o
+   swappato da solo dall'endpoint /approve. #}
+{% set grid_labels = {'front_3q': 'Front ¾', 'rear_3q': 'Rear ¾', 'front': 'Front', 'three_quarter': '3/4', 'side': 'Side', 'back': 'Back'} %}
 <div id="component-{{ comp.id }}"
      class="bg-white dark:bg-stone-900 rounded-xl border border-stone-200 dark:border-stone-800 overflow-hidden">
   <div class="grid grid-cols-2 gap-px bg-stone-200 dark:bg-stone-800">
-    {% for view in ['front', 'three_quarter', 'side', 'back'] %}
-    {% set rel = comp.views.get(view) %}
+    {% for view, rel in (comp.views or {}).items() %}
     {% if rel %}
     <figure class="relative bg-stone-100 dark:bg-stone-800">
       <img src="{{ root_path }}/sessions/{{ session_id }}/files/{{ rel }}"

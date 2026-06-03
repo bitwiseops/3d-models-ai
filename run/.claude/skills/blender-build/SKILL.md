@@ -1,15 +1,19 @@
 ---
 name: blender-build
-description: Costruisce in modo INCREMENTALE un modello 3D in Blender (live, via MCP) a partire dalla descrizione + 4 viste di una sessione Oggetti esistente. Parte in AUTO MODE all'invocazione (gira end-to-end senza chiedere conferme). Prima un parser Opus (subagent, sola percezione, niente MCP) estrae un PART-MANIFEST — l'inventario strutturato di COSA deve esistere (parti, primitive, relazioni); è la single source of truth. Poi un planner Opus (thinking medio) crea il piano focalizzato su GEOMETRIA e SIMMETRIA consumando il manifest, e executor Sonnet in sequenza applicano ogni step privilegiando gli strumenti automatici di Blender (primitive + modifier), si auto-verificano via screenshot ripetendo fino a 3 volte se il risultato non è soddisfacente, e salvano uno snapshot .blend per modifica. Termina con un GATE DI CONVERGENZA che confronta input↔output (metriche oggettive + copertura del manifest + giudizio visivo sulle 4 viste) e raccomanda in modo deterministico se fermarsi o ri-partire dal risultato; si ferma sempre lasciando la decisione all'utente. USARE quando l'utente chiede di "costruire/modellare in Blender" un oggetto da una sessione esistente. PRECONDIZIONE: Blender aperto e connesso al server MCP (porta 9876).
+description: Costruisce in modo INCREMENTALE un modello 3D in Blender (live, via MCP) a partire dalla descrizione + 2 viste 3/4 (front_3q, rear_3q) di una sessione Oggetti esistente. Parte in AUTO MODE all'invocazione (gira end-to-end senza chiedere conferme). Prima un parser Opus (subagent, sola percezione, niente MCP) estrae un PART-MANIFEST — l'inventario strutturato di COSA deve esistere (parti, primitive, relazioni); è la single source of truth. Poi un planner Opus (thinking medio) crea il piano focalizzato su GEOMETRIA e SIMMETRIA consumando il manifest, e executor Sonnet in sequenza applicano ogni step privilegiando gli strumenti automatici di Blender (primitive + modifier), si auto-verificano via screenshot ripetendo fino a 3 volte se il risultato non è soddisfacente, e salvano uno snapshot .blend per modifica. Termina con un GATE DI CONVERGENZA che confronta input↔output (metriche oggettive + copertura del manifest + giudizio visivo su tutte le viste della sessione) e raccomanda in modo deterministico se fermarsi o ri-partire dal risultato; si ferma sempre lasciando la decisione all'utente. USARE quando l'utente chiede di "costruire/modellare in Blender" un oggetto da una sessione esistente. PRECONDIZIONE: Blender aperto e connesso al server MCP (porta 9876).
 ---
 
 # blender-build — costruzione 3D incrementale live in Blender
 
 Pipeline a **più stadi** orchestrata da Claude Code (questo agente) sugli strumenti
 `mcp__blender__*`: **parsing → piano → esecuzione → chiusura → gate**. Input: una sessione
-Oggetti esistente (`outputs/<ts-slug>/`) con prompt raffinato + i 4 crop del grid 2x2
-(front / three_quarter / side / back). Output: modello Blender costruito incrementalmente,
-con storico `.blend` per ogni modifica.
+Oggetti esistente (`outputs/<ts-slug>/`) con prompt raffinato + i crop delle viste della
+sessione — di norma 2 viste 3/4 (`front_3q`, `rear_3q`). Output: modello Blender costruito
+incrementalmente, con storico `.blend` per ogni modifica.
+
+> Le viste sono numero-agnostiche: leggi sempre i nomi reali da `metadata['views']` /
+> dai file `refs/*.png` invece di assumerli. Le sessioni Oggetti precedenti possono ancora
+> avere 4 viste (schema legacy front/three_quarter/side/back); itera su ciò che trovi.
 
 Helper deterministico: `src/blender_build.py` (CLI `uv run python -m src.blender_build ...`).
 Niente IO a mano: usa sempre la CLI per init/manifest/plan/paths/record/status.
@@ -55,8 +59,9 @@ viste in una sola vista vengano "dimenticate" durante la pianificazione.
    ```
    uv run python -m src.blender_build init <source_dir>
    ```
-   → ritorna `{"build_dir": "outputs/blender/<ts-slug>"}`. Copia già le 4 viste in
-   `refs/`, scrive `prompts/00_source.txt` e `metadata.json` (**status=parsing**).
+   → ritorna `{"build_dir": "outputs/blender/<ts-slug>"}`. Copia già tutte le viste della
+   sessione in `refs/` (i nomi reali sono in `metadata['views']` / `refs/*.png`), scrive
+   `prompts/00_source.txt` e `metadata.json` (**status=parsing**).
    **Genera anche le LENTI percettive** di ogni vista in `refs/lenses/<view>__{edges,
    silhouette,color}.png` (mappa in `metadata.ref_lenses`) — varianti filtrate che il
    parser legge ACCANTO all'originale per descrivere l'oggetto con più accuratezza
@@ -64,9 +69,10 @@ viste in una sola vista vengano "dimenticate" durante la pianificazione.
    refs aggiornate), rigenerale con `uv run python -m src.blender_build make-lenses <build_dir>`.
 2. Lancia **un** subagent **parser** con il tool **Agent**:
    - `subagent_type: general-purpose`, `model: opus` — **sola percezione**: gli servono solo
-     `Read` (le 4 viste) e `Write` (il manifest). **NIENTE MCP / niente Blender** in questo stadio.
+     `Read` (tutte le viste in `refs/*.png`) e `Write` (il manifest). **NIENTE MCP / niente
+     Blender** in questo stadio.
    - prompt = **template parser** sotto, con la descrizione (`prompts/00_source.txt`) e i path
-     delle 4 viste `refs/<view>.png`.
+     di tutte le viste `refs/<view>.png` (quelle elencate in `metadata['views']`).
 3. Salva il manifest prodotto dal parser (porta lo stato `parsing → planning`):
    ```
    uv run python -m src.blender_build save-manifest <build_dir> <manifest.json>
@@ -85,22 +91,25 @@ compito del planner/gate):
       "parameters": {"shape": "tronco-conico", "proportions": "altezza ~1.5x larghezza"},
       "relations": [{"type": "attached_to|on_top_of|inside|symmetric_to", "target_id": "base", "detail": "centrato"}],
       "details": ["scanalatura orizzontale a metà altezza"],
-      "source_views": ["front", "side"],
+      "source_views": ["front_3q", "rear_3q"],
       "confidence": "high|medium|low"
     }
   ],
-  "open_questions": ["la maniglia è una o due? la vista back non è conclusiva"]
+  "open_questions": ["la maniglia è una o due? la vista rear_3q non è conclusiva"]
 }
 ```
 
 ### Template prompt per il parser (Opus, sola percezione)
 
 > Sei un analista percettivo. NON modelli nulla: il tuo unico compito è produrre l'**inventario
-> strutturato** delle parti di un oggetto a partire dalla sua descrizione e da 4 viste ortogonali
-> (front / three_quarter / side / back). Niente Blender, niente codice: solo osservazione.
+> strutturato** delle parti di un oggetto a partire dalla sua descrizione e dalle viste della
+> sessione — di norma 2 viste 3/4: `front_3q` (3/4 frontale: fronte + un fianco, leggero tilt
+> verso il basso) e `rear_3q` (3/4 posteriore: retro + fianco opposto). Niente Blender, niente
+> codice: solo osservazione. (Sessioni legacy possono avere 4 viste front/three_quarter/side/back:
+> usa i nomi che ti vengono passati, non assumerli.)
 >
 > DESCRIZIONE: {prompts/00_source.txt}
-> VISTE ORIGINALI (aprile tutte con Read): {refs/front.png, refs/three_quarter.png, refs/side.png, refs/back.png}
+> VISTE ORIGINALI (aprile tutte con Read): {refs/front_3q.png, refs/rear_3q.png — in generale tutti i refs/<view>.png passati}
 > LENTI per ogni vista (aprile con Read accanto all'originale): {refs/lenses/<view>__edges.png,
 >   refs/lenses/<view>__silhouette.png, refs/lenses/<view>__color.png} — i path esatti sono in
 >   `metadata.ref_lenses`. Sono varianti FILTRATE della STESSA vista, non parti nuove.
@@ -114,8 +123,8 @@ compito del planner/gate):
 >      mentalmente sull'asse e verifica che combaci).
 >    - `color` → **regioni a tinta piatta**: usala per separare **parti DISTINTE** e raggruppamenti
 >      per materiale (campi di colore diversi = di norma parti/materiali diversi).
-> 2. **Enumera le parti per ciascuna vista** separatamente (cosa vedi in front, poi in side, ecc.),
->    sintetizzando le evidenze delle lenti.
+> 2. **Enumera le parti per ciascuna vista** separatamente (cosa vedi in front_3q, poi in rear_3q,
+>    ecc. — una vista per volta), sintetizzando le evidenze delle lenti.
 > 3. **Riconcilia tra le viste**: decidi quali osservazioni sono la STESSA parte vista da angoli
 >    diversi e quali sono parti DISTINTE. Una feature visibile in una sola vista (o in una sola
 >    lente) va comunque tenuta (non scartarla perché le altre non la mostrano).
@@ -139,8 +148,8 @@ Il planner **consuma il manifest** (§1) come SSOT: ogni parte del manifest deve
 da almeno uno step. NON re-inventare l'inventario dalle immagini — le viste servono solo per
 capire *come* realizzare le parti già elencate.
 
-1. Leggi `manifest.json` e la descrizione, e **guarda le 4 viste** (`Read` su `refs/front.png`,
-   `three_quarter.png`, `side.png`, `back.png`) per pianificare con il contesto visivo.
+1. Leggi `manifest.json` e la descrizione, e **guarda tutte le viste** (`Read` su tutti i
+   `refs/<view>.png` — di norma `front_3q.png` e `rear_3q.png`) per pianificare con il contesto visivo.
 2. Produci il **piano**: decomposizione in step ordinati **coarse → fine**, ognuno
    espresso con **strumenti automatici di Blender** (vedi Toolbox). Ogni step dichiara in
    `manifest_parts` gli `id` delle parti del manifest che realizza. Scrivi il piano in un file
@@ -165,7 +174,7 @@ capire *come* realizzare le parti già elencate.
          "manifest_parts": ["body"],
          "blender_approach": "primitive_cube_add → Mirror(X) + Subdivision Surface + Bevel; scala a proporzioni ~1.5x altezza",
          "tools": ["primitive_cube_add", "modifier:MIRROR", "modifier:SUBSURF", "modifier:BEVEL"],
-         "reference_views": ["front", "side"],
+         "reference_views": ["front_3q", "rear_3q"],
          "depends_on": [],
          "acceptance": "silhouette frontale e laterale combaciano; simmetria su X"
        }
@@ -222,8 +231,9 @@ salva il miglior tentativo, marca `status: "failed"` nel record con le note, e *
 > PIANO COMPLETO (contesto): {plan.json}
 > STEP DA APPLICARE: {step}
 > PARTI DEL MANIFEST DA REALIZZARE (single source of truth — costruisci QUESTE): {parts di step.manifest_parts}
-> VISTE DI RIFERIMENTO: {refs/front.png, ...} (apri quelle in step.reference_views — servono solo
->   al CHECK VISIVO della forma, NON per inventare feature non presenti nel manifest)
+> VISTE DI RIFERIMENTO: {refs/front_3q.png, refs/rear_3q.png, ...} (apri quelle in
+>   step.reference_views — servono solo al CHECK VISIVO della forma, NON per inventare feature
+>   non presenti nel manifest)
 > PATH ARTEFATTI (assoluti, usali esattamente): blend={...} glb={...} png={...} json={...}
 >
 > Procedura:
@@ -231,9 +241,13 @@ salva il miglior tentativo, marca `status: "failed"` nel record con le note, e *
 > 2. Applica SOLO questo step con `mcp__blender__execute_code` (Python `bpy`): primitive +
 >    modifier dal toolbox. Nomina gli oggetti come da `target`. Tieni i modifier vivi
 >    (non applicarli) salvo che il piano lo richieda.
-> 3. Verifica: per ogni vista in `reference_views`, imposta l'angolo
->    (`bpy.ops.view3d.view_axis(type=...)` — FRONT/RIGHT/BACK; per three_quarter orbita una
->    vista 3/4), poi `mcp__blender__get_viewport_screenshot`. Giudica **forma e simmetria**
+> 3. Verifica: per ogni vista in `reference_views`, riproduci la sua posa di render. Le viste
+>    Oggetti sono **orbite 3/4** (non assi ortogonali): parti dall'hint `view_axis`
+>    (`bpy.ops.view3d.view_axis(type=...)` — l'hint è in `ViewSpec.blender_axis` di
+>    `src/view_schema.py`: `front_3q`→FRONT, `rear_3q`→BACK) e poi **ORBITA** per ottenere la 3/4
+>    (front_3q ≈ orbita 3/4 frontale, rear_3q ≈ orbita 3/4 posteriore). Le sessioni legacy hanno
+>    invece viste ortogonali pure (FRONT/RIGHT/BACK; three_quarter = orbita 3/4). Poi
+>    `mcp__blender__get_viewport_screenshot`. Giudica **forma e simmetria**
 >    (silhouette, proporzioni, simmetria sugli assi) rispetto alla vista di riferimento e a
 >    `acceptance` — NON il colore/materiale.
 > 4. RIPETI fino a un **massimo di 3 tentativi** finché il risultato non è soddisfacente
@@ -266,7 +280,7 @@ Export fatti, **NON** riassumere ancora: prosegui col **gate di convergenza (§5
 
 ## 5. Gate di convergenza (confronto input↔output → stop o re-itera)
 
-Step finale **ingegneristico**: confronta gli input (descrizione + 4 viste `refs/` + manifest)
+Step finale **ingegneristico**: confronta gli input (descrizione + viste `refs/*.png` + manifest)
 con l'output (il modello, ancora in scena dopo la chiusura) in modo **misurabile** e decide se
 fermarsi o ri-partire dal risultato. Confronto **ibrido**: metriche oggettive + **copertura del
 manifest** + giudizio visivo per-vista, **focalizzato su geometria e simmetria** (NON colore).
@@ -275,16 +289,20 @@ manifest** + giudizio visivo per-vista, **focalizzato su geometria e simmetria**
    ```
    uv run python -m src.blender_build eval-paths <build_dir>
    ```
-   → `{"iteration": N, "views": {front,three_quarter,side,back → png assoluti}, "verdict": "...abs..."}`
-   (tutto sotto `eval/iter_NN/`).
+   → `{"iteration": N, "views": {<view> → png assoluto, per ogni vista della sessione, es.
+   front_3q/rear_3q}, "verdict": "...abs..."}` (tutto sotto `eval/iter_NN/`). **Itera sulle
+   viste che ti ritorna `views`**, non assumere quante o quali siano.
 2. **Metriche oggettive in Blender** (`execute_code`, numeri non occhio):
    - bbox in mm vs `target_mm` (le quote-target dal prompt/`strategy`, es. 89×130×3) →
      `proportion_error_pct`.
    - **scarto di simmetria per asse**: specchia la mesh sull'asse di simmetria e misura lo
      scostamento (mm) → `symmetry_dev_mm` per asse.
    - `watertight` (già verificato in chiusura con trimesh): riportalo.
-3. **Render pulito delle 4 viste** del modello: SOLID, overlay/gizmo OFF, orientamento da
-   `view_axis` (FRONT/RIGHT/BACK; per `three_quarter` orbita una 3/4), `view_selected`, poi
+3. **Render pulito di ogni vista** del modello (itera sulle viste tornate da `eval-paths`):
+   SOLID, overlay/gizmo OFF, orientamento dalla posa della vista — parti dall'hint
+   `ViewSpec.blender_axis` (`front_3q`→FRONT, `rear_3q`→BACK) e **ORBITA** per la 3/4
+   (front_3q ≈ orbita 3/4 frontale, rear_3q ≈ orbita 3/4 posteriore; sessioni legacy =
+   FRONT/RIGHT/BACK con three_quarter orbitato), `view_selected`, poi
    `get_viewport_screenshot` salvando in `views[...]` di `eval-paths`. Poi **genera le lenti dei
    render** (per confronto omogeneo con le ref):
    ```
@@ -320,7 +338,7 @@ Schema `verdict.json`:
               "watertight": true},
   "parts_check": [{"id":"body","present":true,"relations_ok":true,"notes":"ok"},
                   {"id":"handle","present":false,"relations_ok":false,"notes":"manca del tutto"}],
-  "views": [{"view":"front","score":92,"notes":"..."}, {"view":"side","score":88,"notes":"..."}],
+  "views": [{"view":"front_3q","score":92,"notes":"..."}, {"view":"rear_3q","score":88,"notes":"..."}],
   "overall_score": 90,
   "actionable_gaps": ["bordo inferiore ~2 mm troppo spesso vs ref", "manca la maniglia (part handle)"]
 }
@@ -343,13 +361,14 @@ Schema `verdict.json`:
 > GEOMETRICHE concrete e correggibili (es. "bordo inferiore troppo spesso", "manca la parte handle",
 > "spigolo non smussato"), non estetiche.
 >
-> VISTE (render ↔ ref, con lenti): {front: <render> + <eval/iter_NN/lenses/front__{edges,silhouette}.png>
->   ↔ <refs/front.png> + <refs/lenses/front__{edges,silhouette}.png>, ...}
+> VISTE (render ↔ ref, con lenti — una entry per ogni vista della sessione, es. front_3q/rear_3q):
+>   {front_3q: <render> + <eval/iter_NN/lenses/front_3q__{edges,silhouette}.png>
+>   ↔ <refs/front_3q.png> + <refs/lenses/front_3q__{edges,silhouette}.png>, rear_3q: ...}
 > MANIFEST (parti attese): {manifest.json}
 > METRICHE OGGETTIVE (contesto): {bbox_mm, target_mm, symmetry_dev_mm, watertight}
 >
 > RITORNA come testo finale SOLO questo JSON:
-> `{"views":[{"view":"front","score":N,"notes":"..."}, ...],
+> `{"views":[{"view":"front_3q","score":N,"notes":"..."}, ...],
 >   "parts_check":[{"id":"...","present":true|false,"relations_ok":true|false,"notes":"..."}, ...],
 >   "overall_score":N, "actionable_gaps":["...", "..."]}`
 > dove `overall_score` è la tua sintesi pesata (penalizza forte gli errori di proporzione e

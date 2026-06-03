@@ -28,10 +28,9 @@ import shutil
 from datetime import datetime
 from pathlib import Path
 
-from . import image_lenses, storage
+from . import image_lenses, storage, view_schema
 from .fusion_build import (  # riuso diretto dei pezzi CAD-agnostici
     FUSION_OUTPUTS_ROOT,
-    VIEW_NAMES,
     _load_metadata,
     _patch_metadata,
     _rel_lenses,
@@ -57,10 +56,12 @@ def load_components_inputs(source_dir: Path) -> dict:
     """
     source_dir = source_dir.resolve()
     manifest = storage.load_components_manifest(source_dir)
+    schema = view_schema.resolve_object_schema(manifest)
+    names = schema.names
 
     design_views_rel = manifest.get("design_views") or {}
     design_views: dict[str, Path] = {}
-    for name in VIEW_NAMES:
+    for name in names:
         rel = design_views_rel.get(name)
         p = (source_dir / rel) if rel else None
         if not p or not p.exists():
@@ -74,7 +75,7 @@ def load_components_inputs(source_dir: Path) -> dict:
         cid = c.get("id")
         views_rel = c.get("views") or {}
         views: dict[str, Path] = {}
-        for name in VIEW_NAMES:
+        for name in names:
             rel = views_rel.get(name)
             p = (source_dir / rel) if rel else None
             if not p or not p.exists():
@@ -94,16 +95,20 @@ def load_components_inputs(source_dir: Path) -> dict:
         "main_prompt": manifest.get("main_prompt", ""),
         "main_subject": manifest.get("main_subject") or manifest.get("main_prompt", ""),
         "design_views": design_views,
+        "view_schema": schema.key,
         "components": components,
         "open_questions": manifest.get("open_questions") or [],
         "source_session": source_dir.name,
     }
 
 
-def _gen_ref_lenses(build_dir: Path) -> tuple[dict, dict]:
+def _gen_ref_lenses(build_dir: Path, schema: view_schema.ViewSchema) -> tuple[dict, dict]:
     """Genera le lenti percettive su refs/<view>.png (whole) e su ogni
-    refs/components/<id>/<view>.png. Ritorna (whole_rel, {id: component_rel})."""
-    whole_views = {n: build_dir / "refs" / f"{n}.png" for n in VIEW_NAMES}
+    refs/components/<id>/<view>.png, secondo `schema`. Ritorna (whole_rel,
+    {id: component_rel}). `schema` esplicito perché chiamata anche prima che
+    metadata.json esista (init/reinit)."""
+    names = schema.names
+    whole_views = {n: build_dir / "refs" / f"{n}.png" for n in names}
     whole_abs = image_lenses.generate_lenses(
         {n: p for n, p in whole_views.items() if p.exists()},
         build_dir / "refs" / "lenses",
@@ -114,7 +119,7 @@ def _gen_ref_lenses(build_dir: Path) -> tuple[dict, dict]:
     comp_root = build_dir / "refs" / "components"
     if comp_root.exists():
         for cdir in sorted(p for p in comp_root.iterdir() if p.is_dir()):
-            views = {n: cdir / f"{n}.png" for n in VIEW_NAMES}
+            views = {n: cdir / f"{n}.png" for n in names}
             abs_map = image_lenses.generate_lenses(
                 {n: p for n, p in views.items() if p.exists()},
                 cdir / "lenses",
@@ -162,7 +167,8 @@ def init_components_session(source_dir: Path) -> Path:
             {k: v for k, v in c.items() if not k.startswith("_")}
         )
 
-    whole_lenses, comp_lenses = _gen_ref_lenses(build_dir)
+    schema = view_schema.get_schema(src["view_schema"])
+    whole_lenses, comp_lenses = _gen_ref_lenses(build_dir, schema)
 
     (build_dir / "prompts" / "00_source.txt").write_text(
         f"# source session: {src['source_session']} (scomposta in {len(components_meta)} componenti)\n\n"
@@ -192,6 +198,7 @@ def init_components_session(source_dir: Path) -> Path:
         "action_plan_path": "action-plan.json",
         "manifest_path": "manifest.json",
         "plan_path": "plan.json",
+        "view_schema": src["view_schema"],
         "views": whole_rel,
         "component_views": component_views,
         "ref_lenses": whole_lenses,
@@ -254,7 +261,8 @@ def make_lenses(build_dir: Path, iteration: int | None = None) -> dict:
     eval/iter_NN/, edges+silhouette)."""
     build_dir = build_dir.resolve()
     if iteration is None:
-        whole_lenses, comp_lenses = _gen_ref_lenses(build_dir)
+        schema = view_schema.get_schema(_load_metadata(build_dir).get("view_schema"))
+        whole_lenses, comp_lenses = _gen_ref_lenses(build_dir, schema)
         _patch_metadata(
             build_dir,
             lambda d: d.update(ref_lenses=whole_lenses, component_ref_lenses=comp_lenses),
@@ -291,8 +299,11 @@ def reinit_from_result(prev_build_dir: Path) -> dict:
     # refs invariati: copia l'intero albero refs/ (whole + componenti + lenti)
     if (prev_build_dir / "refs").exists():
         shutil.copytree(prev_build_dir / "refs", build_dir / "refs")
-    # rigenera le lenti per sicurezza (input invariati)
-    whole_lenses, comp_lenses = _gen_ref_lenses(build_dir)
+    # rigenera le lenti per sicurezza (input invariati, stesso schema viste)
+    schema_key = prev_meta.get("view_schema")
+    whole_lenses, comp_lenses = _gen_ref_lenses(
+        build_dir, view_schema.get_schema(schema_key)
+    )
 
     shutil.copy2(seed_src, build_dir / "seed.f3d")
 
@@ -326,6 +337,7 @@ def reinit_from_result(prev_build_dir: Path) -> dict:
         "action_plan_path": "action-plan.json",
         "manifest_path": "manifest.json" if has_manifest else None,
         "plan_path": "plan.json",
+        "view_schema": schema_key,
         "views": prev_meta.get("views", {}),
         "component_views": prev_meta.get("component_views", {}),
         "ref_lenses": whole_lenses,

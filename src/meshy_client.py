@@ -11,6 +11,12 @@ class MeshyError(RuntimeError):
     pass
 
 
+class MeshyInsufficientCredits(MeshyError):
+    """Crediti esauriti per la API key usata (HTTP 402 o errore 'credits' sulla
+    POST). Segnale per il failover su una chiave alternativa (vedi
+    `create_with_failover`)."""
+
+
 class MeshyTaskFailed(MeshyError):
     def __init__(self, status: str, detail):
         super().__init__(f"Meshy task {status}: {detail}")
@@ -31,6 +37,63 @@ def _headers(api_key: str | None = None) -> dict:
     }
 
 
+def _raise_for_post(r: requests.Response, label: str) -> None:
+    """Solleva l'eccezione giusta per una POST Meshy fallita: 402 o body che
+    menziona crediti/saldo → `MeshyInsufficientCredits` (failover), altrimenti
+    `MeshyError`."""
+    body = r.text or ""
+    if r.status_code == 402 or (
+        not r.ok
+        and any(t in body.lower() for t in ("credit", "insufficient", "balance", "payment"))
+    ):
+        raise MeshyInsufficientCredits(f"{label} POST {r.status_code}: {body}")
+    raise MeshyError(f"{label} POST {r.status_code}: {body}")
+
+
+def resolve_keys(api_key: str | None = None) -> list[str]:
+    """Ordine di chiavi da provare per un'operazione. Una `api_key` esplicita non
+    di default (es. la test key da CLI) viene usata da sola; altrimenti si usano
+    le chiavi di config (principale + fallback). Garantisce sempre ≥1 voce se una
+    chiave è configurata."""
+    if api_key and api_key not in (config.MESHY_API_KEY, config.MESHY_API_KEY_FALLBACK):
+        return [api_key]
+    keys = config.meshy_api_keys()
+    if keys:
+        return keys
+    return [api_key] if api_key else []
+
+
+def create_with_failover(
+    starter: Callable[[str], str],
+    *,
+    api_keys: list[str] | None = None,
+    api_key: str | None = None,
+    label: str = "task",
+) -> tuple[str, str]:
+    """Crea un task Meshy provando le chiavi in ordine, passando alla successiva
+    se quella corrente ha i crediti esauriti. `starter(key)` esegue la POST e
+    ritorna il task_id. Ritorna `(task_id, used_key)`: il chiamante DEVE pollare
+    con `used_key`, perché il task appartiene all'account di quella chiave.
+
+    `api_keys` esplicito ha priorità; altrimenti deriva da `resolve_keys(api_key)`.
+    """
+    keys = api_keys if api_keys is not None else resolve_keys(api_key)
+    if not keys:
+        raise MeshyError("Nessuna API key Meshy configurata.")
+    last_exc: MeshyInsufficientCredits | None = None
+    for i, key in enumerate(keys):
+        try:
+            return starter(key), key
+        except MeshyInsufficientCredits as e:
+            last_exc = e
+            if i + 1 < len(keys):
+                sys.stderr.write(
+                    f"  [meshy] crediti esauriti su key #{i + 1}, provo la successiva ({label})…\n"
+                )
+            continue
+    raise last_exc or MeshyError("Nessuna API key Meshy con crediti disponibili.")
+
+
 def text_to_image(
     prompt: str,
     *,
@@ -46,7 +109,7 @@ def text_to_image(
         timeout=60,
     )
     if not r.ok:
-        raise MeshyError(f"text-to-image POST {r.status_code}: {r.text}")
+        _raise_for_post(r, "text-to-image")
     return r.json()["result"]
 
 
@@ -83,7 +146,7 @@ def image_to_image(
         timeout=60,
     )
     if not r.ok:
-        raise MeshyError(f"image-to-image POST {r.status_code}: {r.text}")
+        _raise_for_post(r, "image-to-image")
     return r.json()["result"]
 
 
@@ -127,7 +190,7 @@ def image_to_3d(
         timeout=60,
     )
     if not r.ok:
-        raise MeshyError(f"image-to-3d POST {r.status_code}: {r.text}")
+        _raise_for_post(r, "image-to-3d")
     return r.json()["result"]
 
 
@@ -169,7 +232,7 @@ def multi_image_to_3d(
         timeout=60,
     )
     if not r.ok:
-        raise MeshyError(f"multi-image-to-3d POST {r.status_code}: {r.text}")
+        _raise_for_post(r, "multi-image-to-3d")
     return r.json()["result"]
 
 
@@ -206,7 +269,7 @@ def print_analyze(
         timeout=60,
     )
     if not r.ok:
-        raise MeshyError(f"print/analyze POST {r.status_code}: {r.text}")
+        _raise_for_post(r, "print/analyze")
     task = poll(
         "/print/analyze",
         r.json()["result"],
@@ -246,7 +309,7 @@ def print_repair(
         timeout=60,
     )
     if not r.ok:
-        raise MeshyError(f"print/repair POST {r.status_code}: {r.text}")
+        _raise_for_post(r, "print/repair")
     task = poll(
         "/print/repair",
         r.json()["result"],

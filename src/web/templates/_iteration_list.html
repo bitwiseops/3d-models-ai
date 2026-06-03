@@ -21,14 +21,14 @@
 {% endif %}
 
 {# Iterazioni: la più recente in cima #}
-{% set grid_labels = {'front': 'Front', 'three_quarter': '3/4', 'side': 'Side', 'back': 'Back'} %}
+{% set grid_labels = {'front_3q': 'Front ¾', 'rear_3q': 'Rear ¾', 'front': 'Front', 'three_quarter': '3/4', 'side': 'Side', 'back': 'Back'} %}
 <ol class="space-y-4">
   {% for it in meta.iterations | reverse %}
   <li class="bg-white dark:bg-stone-900 rounded-xl border border-stone-200 dark:border-stone-800 overflow-hidden">
     {% if it.image_paths_grid %}
     <div class="grid grid-cols-2 gap-px bg-stone-200 dark:bg-stone-800">
       {% for q in it.image_paths_grid %}
-      {% set qname = q.rsplit('/', 1)[-1].rsplit('.', 1)[0].rsplit('_', 1)[-1] %}
+      {% set qname = q.rsplit('/', 1)[-1].rsplit('.', 1)[0].split('_grid_')[-1] %}
       <figure class="relative bg-stone-100 dark:bg-stone-800">
         <img src="{{ root_path }}/sessions/{{ session_id }}/files/{{ q }}"
              alt="v{{ it.version }} {{ qname }}" loading="lazy" decoding="async"
@@ -123,8 +123,8 @@
   <div class="bg-white dark:bg-stone-900 border border-stone-200 dark:border-stone-800 rounded-xl p-4 space-y-3">
     <p class="text-sm text-stone-600 dark:text-stone-300">
       Scomponi l'oggetto nei suoi pezzi: ogni componente ottiene un prompt
-      dedicato (consapevole del contesto) e una propria grid 2x2. È l'input per
-      la build parametrica in Fusion.
+      dedicato (scritto guardando il design dell'oggetto intero) e le proprie
+      viste 3/4. È l'input per la build parametrica in Fusion.
     </p>
     <form hx-post="{{ root_path }}/sessions/{{ session_id }}/breakdown"
           hx-target="#components-progress-mount"

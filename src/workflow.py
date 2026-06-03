@@ -7,10 +7,19 @@ from typing import Callable
 import numpy as np
 from PIL import Image
 
-from . import config, grid_utils, meshy_client, prompt_refiner, storage, usage as usage_mod
+from . import (
+    config,
+    grid_utils,
+    meshy_client,
+    prompt_refiner,
+    storage,
+    usage as usage_mod,
+    view_schema,
+)
 
 
-# Grid 2x2 (4 viste in un'unica immagine), poi cropped lato Python.
+# Griglia composita (più viste in un'unica immagine), poi cropped lato Python.
+# Aspect ratio di fallback; le sessioni Oggetti usano quello del loro ViewSchema.
 IMAGE_ASPECT_RATIO = "1:1"
 
 # Prompt per il pre-step opzionale di pulizia reference: normalizza sfondo,
@@ -136,38 +145,55 @@ def _meshy_grid(
     *,
     references: list[Path] | None = None,
     label: str,
+    aspect_ratio: str = IMAGE_ASPECT_RATIO,
+    clean: bool | None = None,
     on_progress: ProgressCallback = None,
     api_key: str | None = None,
 ) -> tuple[str, str, int]:
-    """Genera una grid 2x2 via Meshy e ritorna `(image_url, task_id, credits)`.
+    """Genera una griglia composita via Meshy e ritorna `(image_url, task_id, credits)`.
 
     Se `references` è non vuota usa image-to-image (con eventuale pre-step di
     pulizia reference, come da config/metadata di sessione); altrimenti
-    text-to-image. Le credit dell'eventuale clean vengono registrate qui
-    (`add_credits image_clean`); le credit del task immagine sono ritornate al
-    chiamante che decide in che bucket sommarle. Corpo condiviso tra le
-    iterazioni Oggetti (`_generate_image`) e i componenti (`_generate_component_image`).
+    text-to-image con `aspect_ratio`. Le credit dell'eventuale clean vengono
+    registrate qui (`add_credits image_clean`); le credit del task immagine sono
+    ritornate al chiamante che decide in che bucket sommarle. Corpo condiviso tra
+    le iterazioni Oggetti (`_generate_image`) e i componenti
+    (`_generate_component_image`).
+
+    `clean`: forza on/off il pre-step di pulizia reference. Se None (default),
+    usa il flag di sessione/config. I componenti usano `clean=False` perché le
+    loro reference sono già render puliti del whole-object.
     """
+    # Chiavi da provare (principale + fallback): se la corrente esaurisce i crediti
+    # alla POST, si passa alla successiva. Il task va pollato con la chiave che
+    # l'ha creato → `create_with_failover` ritorna `(task_id, used_key)`.
+    keys = meshy_client.resolve_keys(api_key)
     if references:
         print(
             f"\nGenerazione {label} via Meshy "
             f"image-to-image ({config.MESHY_IMAGE_MODEL}, {len(references)} reference)…"
         )
         ref_uris = [_to_data_uri_any(p) for p in references]
-        meta = storage.load_metadata(session)
-        clean = meta.get("clean_references", config.MESHY_CLEAN_REFERENCES)
+        if clean is None:
+            meta = storage.load_metadata(session)
+            clean = meta.get("clean_references", config.MESHY_CLEAN_REFERENCES)
         if clean:
             print("  [clean] pre-step pulizia reference via image-to-image…")
-            clean_task_id = meshy_client.image_to_image(
-                CLEAN_REFERENCE_PROMPT, reference_image_urls=ref_uris, api_key=api_key
+            clean_task_id, clean_key = meshy_client.create_with_failover(
+                lambda k: meshy_client.image_to_image(
+                    CLEAN_REFERENCE_PROMPT, reference_image_urls=ref_uris, api_key=k
+                ),
+                api_keys=keys,
+                label=f"clean {label}",
             )
+            keys = [clean_key] + [k for k in keys if k != clean_key]
             clean_task = meshy_client.poll(
                 "/image-to-image",
                 clean_task_id,
                 label=f"clean {label}",
                 max_wait=600,
                 on_progress=on_progress,
-                api_key=api_key,
+                api_key=clean_key,
             )
             cleaned_urls = clean_task.get("image_urls") or []
             if cleaned_urls:
@@ -177,26 +203,29 @@ def _meshy_grid(
                 add_credits={"image_clean": clean_task.get("consumed_credits", 0)},
             )
             print(f"  [clean] reference normalizzate ({len(ref_uris)})")
-        img_task_id = meshy_client.image_to_image(
-            prompt, reference_image_urls=ref_uris, api_key=api_key
+        starter = lambda k: meshy_client.image_to_image(
+            prompt, reference_image_urls=ref_uris, api_key=k
         )
         endpoint = "/image-to-image"
     else:
         print(
             f"\nGenerazione {label} via Meshy "
-            f"text-to-image ({config.MESHY_IMAGE_MODEL}, {IMAGE_ASPECT_RATIO})…"
+            f"text-to-image ({config.MESHY_IMAGE_MODEL}, {aspect_ratio})…"
         )
-        img_task_id = meshy_client.text_to_image(
-            prompt, aspect_ratio=IMAGE_ASPECT_RATIO, api_key=api_key
+        starter = lambda k: meshy_client.text_to_image(
+            prompt, aspect_ratio=aspect_ratio, api_key=k
         )
         endpoint = "/text-to-image"
+    img_task_id, used_key = meshy_client.create_with_failover(
+        starter, api_keys=keys, label=label
+    )
     task = meshy_client.poll(
         endpoint,
         img_task_id,
         label=label,
         max_wait=600,
         on_progress=on_progress,
-        api_key=api_key,
+        api_key=used_key,
     )
     image_url = task["image_urls"][0]
     credits = task.get("consumed_credits", 0)
@@ -211,12 +240,14 @@ def _generate_image(
     on_progress: ProgressCallback = None,
     api_key: str | None = None,
 ) -> Path:
+    schema = view_schema.DEFAULT_OBJECT_SCHEMA
     references = _session_references(session)
     image_url, img_task_id, credits = _meshy_grid(
         session,
         prompt,
         references=references or None,
         label=f"image v{version}",
+        aspect_ratio=schema.aspect_ratio,
         on_progress=on_progress,
         api_key=api_key,
     )
@@ -225,7 +256,7 @@ def _generate_image(
     new_grid_path = grid_path.with_name(grid_path.stem + "_grid.png")
     grid_path.rename(new_grid_path)
     grid_path = new_grid_path
-    quadrants = grid_utils.crop_grid_2x2(grid_path, prefix=grid_path.stem)
+    crops = grid_utils.crop_grid(grid_path, schema, prefix=grid_path.stem)
     iter_record = {
         "version": version,
         "prompt": prompt,
@@ -233,16 +264,17 @@ def _generate_image(
         # `image_path` rimane per compat con codice/template che lo cercano.
         "image_path": str(grid_path.relative_to(session)),
         "grid_path": str(grid_path.relative_to(session)),
-        "image_paths_grid": [str(p.relative_to(session)) for p in quadrants],
+        "image_paths_grid": [str(p.relative_to(session)) for p in crops],
         "credits": credits,
     }
     storage.update_metadata(
         session,
         append_iteration=iter_record,
+        view_schema=schema.key,
         add_credits={"text_to_image": credits},
     )
-    print(f"Grid 2x2 salvato: {grid_path}")
-    print(f"  quadranti → {', '.join(p.name for p in quadrants)}")
+    print(f"Griglia {schema.cols}x{schema.rows} salvata: {grid_path}")
+    print(f"  viste → {', '.join(p.name for p in crops)}")
     print(f"  credits: {credits}")
     return grid_path
 
@@ -426,11 +458,15 @@ def accept_and_breakdown(
 
 # --- Scomposizione in componenti -------------------------------------------
 # Stadio post-accept: l'oggetto accettato viene scomposto in componenti, ognuno
-# con un prompt context-aware e una propria grid 2x2 (4 viste). L'output è il
-# bundle components/components.json letto dalla skill fusion-build-from-components.
-
-# Nomi dei 4 quadranti nell'ordine prodotto da grid_utils.crop_grid_2x2.
-_QUADRANT_NAMES = [name for name, _, _ in grid_utils.GRID_QUADRANTS]
+# con un prompt context-aware e la propria griglia di viste. L'output è il bundle
+# components/components.json letto dalla skill fusion-build-from-components.
+#
+# Coerenza: ogni componente è generato in TEXT-TO-IMAGE dal suo prompt (che il
+# refiner scrive VEDENDO la griglia whole-object, quindi descrive il pezzo coerente
+# con il tutto). NB: l'image-to-image con la griglia whole come reference è stato
+# scartato perché Meshy nano-banana-pro RIPRODUCE la reference (l'oggetto intero) e
+# ignora l'istruzione di isolare il singolo pezzo → niente decomposizione. Il
+# text-to-image invece rispetta sia l'isolamento del pezzo sia l'aspect 16:9.
 
 
 def _generate_component_image(
@@ -439,29 +475,34 @@ def _generate_component_image(
     version: int,
     prompt: str,
     *,
+    schema: "view_schema.ViewSchema",
+    references: list[Path] | None = None,
     on_progress: ProgressCallback = None,
     api_key: str | None = None,
 ) -> dict:
-    """Genera la grid 2x2 di un componente (text-to-image), la salva sotto
-    components/<id>/images/ e la ritaglia nei 4 quadranti. Ritorna
-    {grid_path, views:{view:rel}, task_id, credits} con path RELATIVI alla session.
+    """Genera la griglia di un componente, la salva sotto components/<id>/images/
+    e la ritaglia secondo `schema`. Di norma text-to-image (`references=None`), che
+    isola il pezzo e rispetta l'aspect dello schema. Ritorna {grid_path,
+    views:{view:rel}, task_id, credits} con path RELATIVI alla session.
     """
     image_url, img_task_id, credits = _meshy_grid(
         session,
         prompt,
-        references=None,
+        references=references or None,
         label=f"componente {component_id} v{version}",
+        aspect_ratio=schema.aspect_ratio,
+        clean=False,
         on_progress=on_progress,
         api_key=api_key,
     )
     grid_path = storage.save_component_image_from_url(
         session, component_id, version, image_url
     )
-    quadrants = grid_utils.crop_grid_2x2(grid_path, prefix=grid_path.stem)
+    crops = grid_utils.crop_grid(grid_path, schema, prefix=grid_path.stem)
     storage.update_metadata(session, add_credits={"text_to_image": credits})
     views = {
         name: str(q.relative_to(session))
-        for name, q in zip(_QUADRANT_NAMES, quadrants)
+        for name, q in zip(schema.names, crops)
     }
     print(f"  componente {component_id}: grid {grid_path.name} (credits {credits})")
     return {
@@ -506,9 +547,10 @@ def breakdown_into_components(
     main_prompt = it["prompt"]
     main_subject = prompt_refiner._strip_staging(main_prompt)
     design_grid = session / (it.get("grid_path") or it["image_path"])
+    schema = view_schema.resolve_object_schema(meta)
     design_views = {
         name: rel
-        for name, rel in zip(_QUADRANT_NAMES, it.get("image_paths_grid") or [])
+        for name, rel in zip(schema.names, it.get("image_paths_grid") or [])
     }
 
     def _on_claude(model: str, inp: int, out: int) -> None:
@@ -548,7 +590,13 @@ def breakdown_into_components(
         if on_step:
             on_step(f"{label} — generazione immagine")
         img = _generate_component_image(
-            session, cid, 1, comp_prompt, on_progress=on_progress, api_key=api_key
+            session,
+            cid,
+            1,
+            comp_prompt,
+            schema=schema,
+            on_progress=on_progress,
+            api_key=api_key,
         )
         out_components.append(
             {
@@ -571,6 +619,7 @@ def breakdown_into_components(
     manifest = {
         "schema_version": 1,
         "source_session": session.name,
+        "view_schema": schema.key,
         "main_prompt": main_prompt,
         "main_subject": main_subject,
         "design_image": str(design_grid.relative_to(session)),
@@ -611,6 +660,7 @@ def regenerate_component(
         manifest.get("main_prompt", "")
     )
     design_grid = session / manifest["design_image"]
+    schema = view_schema.resolve_object_schema(manifest)
     siblings = [c for c in components if c.get("id") != component_id]
 
     def _on_claude(model: str, inp: int, out: int) -> None:
@@ -631,6 +681,7 @@ def regenerate_component(
         component_id,
         new_version,
         new_prompt,
+        schema=schema,
         on_progress=on_progress,
         api_key=api_key,
     )

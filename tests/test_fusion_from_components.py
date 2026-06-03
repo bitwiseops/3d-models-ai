@@ -8,17 +8,19 @@ from pathlib import Path
 import pytest
 from PIL import Image
 
-from src import fusion_build, fusion_build_from_components as fbc, storage
+from src import fusion_build, fusion_build_from_components as fbc, storage, view_schema
+
+VIEW_NAMES = view_schema.OBJECT_VIEWS.names
 
 
 def _make_bundle(session: Path) -> None:
-    """Crea components/components.json + le 4 viste whole e per-componente."""
+    """Crea components/components.json + le viste 3/4 whole e per-componente."""
     def png(p: Path):
         p.parent.mkdir(parents=True, exist_ok=True)
         Image.new("RGB", (32, 32), (180, 180, 180)).save(p)
 
     views = {}
-    for name in fbc.VIEW_NAMES:
+    for name in VIEW_NAMES:
         rel = f"images/01_grid_{name}.png"
         png(session / rel)
         views[name] = rel
@@ -26,7 +28,7 @@ def _make_bundle(session: Path) -> None:
     components = []
     for cid in ("body", "lid"):
         cviews = {}
-        for name in fbc.VIEW_NAMES:
+        for name in VIEW_NAMES:
             rel = f"components/{cid}/images/01_grid_{name}.png"
             png(session / rel)
             cviews[name] = rel
@@ -41,6 +43,7 @@ def _make_bundle(session: Path) -> None:
 
     manifest = {
         "schema_version": 1, "source_session": session.name,
+        "view_schema": view_schema.OBJECT_VIEWS.key,
         "main_prompt": "A teapot.", "main_subject": "A teapot.",
         "design_image": "images/01_grid.png", "design_views": views,
         "components": components, "open_questions": [], "consumed_by": [],
@@ -65,11 +68,11 @@ def test_init_creates_build_dir(bundle_session: Path) -> None:
     build_dir = fbc.init_components_session(bundle_session)
     assert build_dir.exists()
     # viste whole in refs/<view>.png
-    for name in fbc.VIEW_NAMES:
+    for name in VIEW_NAMES:
         assert (build_dir / "refs" / f"{name}.png").exists()
     # viste per-componente
     for cid in ("body", "lid"):
-        for name in fbc.VIEW_NAMES:
+        for name in VIEW_NAMES:
             assert (build_dir / "refs" / "components" / cid / f"{name}.png").exists()
     # lenti generate (whole + componenti)
     assert (build_dir / "refs" / "lenses").exists()
@@ -131,7 +134,7 @@ def test_action_plan_and_manifest_flow(bundle_session: Path) -> None:
     # eval-paths crea la cartella iterazione
     ev = fbc.eval_paths(build_dir)
     assert ev["iteration"] == 1
-    assert set(ev["views"]) == set(fbc.VIEW_NAMES)
+    assert set(ev["views"]) == set(VIEW_NAMES)
 
 
 def test_save_action_plan_rejects_bad_joint(bundle_session: Path) -> None:
@@ -159,5 +162,5 @@ def test_reinit_from_result(bundle_session: Path) -> None:
     assert res["hints"] == ["manca smusso"]
     assert (new_dir / "seed.f3d").exists()
     # refs whole + componenti copiati
-    assert (new_dir / "refs" / "front.png").exists()
-    assert (new_dir / "refs" / "components" / "body" / "front.png").exists()
+    assert (new_dir / "refs" / f"{VIEW_NAMES[0]}.png").exists()
+    assert (new_dir / "refs" / "components" / "body" / f"{VIEW_NAMES[0]}.png").exists()

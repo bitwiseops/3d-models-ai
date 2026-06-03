@@ -30,12 +30,12 @@ def client(tmp_outputs: Path):
 
 
 def _accepted_session(name: str) -> Path:
-    from src import grid_utils
+    from src import grid_utils, view_schema
 
     session = storage.create_session(name)
     grid = session / "images" / "01_grid.png"
-    Image.new("RGB", (64, 64), (200, 180, 160)).save(grid)
-    crops = grid_utils.crop_grid_2x2(grid, prefix=grid.stem)
+    Image.new("RGB", (64, 32), (200, 180, 160)).save(grid)
+    crops = grid_utils.crop_grid(grid, view_schema.OBJECT_VIEWS, prefix=grid.stem)
     storage.update_metadata(
         session,
         append_iteration={
@@ -47,6 +47,7 @@ def _accepted_session(name: str) -> Path:
             "image_paths_grid": [str(c.relative_to(session)) for c in crops],
             "credits": 9,
         },
+        view_schema=view_schema.OBJECT_VIEWS.key,
         accepted_iteration=1,
         image_task_id="t",
     )
@@ -55,12 +56,12 @@ def _accepted_session(name: str) -> Path:
 
 def _session_with_iteration(name: str) -> Path:
     """Come _accepted_session ma SENZA accettazione: ha solo l'iterazione v1."""
-    from src import grid_utils
+    from src import grid_utils, view_schema
 
     session = storage.create_session(name)
     grid = session / "images" / "01_grid.png"
-    Image.new("RGB", (64, 64), (200, 180, 160)).save(grid)
-    crops = grid_utils.crop_grid_2x2(grid, prefix=grid.stem)
+    Image.new("RGB", (64, 32), (200, 180, 160)).save(grid)
+    crops = grid_utils.crop_grid(grid, view_schema.OBJECT_VIEWS, prefix=grid.stem)
     storage.update_metadata(
         session,
         append_iteration={
@@ -72,12 +73,14 @@ def _session_with_iteration(name: str) -> Path:
             "image_paths_grid": [str(c.relative_to(session)) for c in crops],
             "credits": 9,
         },
+        view_schema=view_schema.OBJECT_VIEWS.key,
     )
     return session
 
 
 def _mock_generation(monkeypatch):
-    def fake_meshy_grid(session, prompt, *, references=None, label="", on_progress=None, api_key=None):
+    def fake_meshy_grid(session, prompt, *, references=None, label="",
+                        aspect_ratio="1:1", clean=None, on_progress=None, api_key=None):
         return "fake://grid", "task", 9
 
     def fake_save(session, component_id, version, url):

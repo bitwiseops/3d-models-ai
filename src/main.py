@@ -22,6 +22,10 @@ def _apply_test_mode(flag: bool) -> None:
     if flag:
         os.environ["MESHY_API_KEY"] = config.MESHY_TEST_KEY
         config.MESHY_API_KEY = config.MESHY_TEST_KEY
+        # Neutralizza anche il fallback: in test mode niente chiavi reali, così il
+        # failover non passerebbe mai a una key che consuma credit veri.
+        os.environ.pop("MESHY_API_KEY_FALLBACK", None)
+        config.MESHY_API_KEY_FALLBACK = None
     if config.is_test_mode():
         print("⚠️  Meshy in TEST MODE: niente credit, output dummy.\n")
 

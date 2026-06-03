@@ -7,9 +7,23 @@ load_dotenv()
 
 ANTHROPIC_API_KEY = os.environ.get("ANTHROPIC_API_KEY")
 MESHY_API_KEY = os.environ.get("MESHY_API_KEY")
+# Chiave Meshy di fallback: usata automaticamente se la principale esaurisce i
+# crediti (HTTP 402 / errore credits sulla POST di creazione task). Opzionale.
+MESHY_API_KEY_FALLBACK = os.environ.get("MESHY_API_KEY_FALLBACK")
 
 MESHY_BASE = "https://api.meshy.ai/openapi/v1"
 MESHY_TEST_KEY = "msy_dummy_api_key_for_test_mode_12345678"
+
+
+def meshy_api_keys() -> list[str]:
+    """Chiavi Meshy in ordine di preferenza: principale poi fallback. Deduplicata,
+    solo voci non vuote. Il client le prova in sequenza, passando alla successiva
+    se quella corrente è a crediti esauriti."""
+    keys: list[str] = []
+    for k in (MESHY_API_KEY, MESHY_API_KEY_FALLBACK):
+        if k and k not in keys:
+            keys.append(k)
+    return keys
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 OUTPUTS_ROOT = PROJECT_ROOT / "outputs"

@@ -16,16 +16,16 @@ from src import storage, workflow
 
 @pytest.fixture
 def accepted_session(tmp_path: Path, monkeypatch) -> Path:
-    """Sessione Oggetti con un'iterazione accettata (grid 2x2 reale + 4 crop)."""
+    """Sessione Oggetti con un'iterazione accettata (griglia 1x2 due 3/4 + crop)."""
     monkeypatch.setattr(storage.config, "OUTPUTS_ROOT", tmp_path)
     session = storage.create_session("teiera con coperchio e manico")
 
-    # grid 2x2 fittizia + crop, come li produrrebbe _generate_image
-    grid = session / "images" / "01_grid.png"
-    Image.new("RGB", (64, 64), (200, 180, 160)).save(grid)
-    from src import grid_utils
+    from src import grid_utils, view_schema
 
-    crops = grid_utils.crop_grid_2x2(grid, prefix=grid.stem)
+    # griglia 1x2 (2:1) fittizia + crop, come li produrrebbe _generate_image
+    grid = session / "images" / "01_grid.png"
+    Image.new("RGB", (64, 32), (200, 180, 160)).save(grid)
+    crops = grid_utils.crop_grid(grid, view_schema.OBJECT_VIEWS, prefix=grid.stem)
     storage.update_metadata(
         session,
         append_iteration={
@@ -37,6 +37,7 @@ def accepted_session(tmp_path: Path, monkeypatch) -> Path:
             "image_paths_grid": [str(c.relative_to(session)) for c in crops],
             "credits": 9,
         },
+        view_schema=view_schema.OBJECT_VIEWS.key,
         accepted_iteration=1,
         image_task_id="task-1",
     )
@@ -44,8 +45,9 @@ def accepted_session(tmp_path: Path, monkeypatch) -> Path:
 
 
 def _mock_meshy(monkeypatch):
-    """Sostituisce la generazione immagine: niente rete, scrive una grid 2x2 vera."""
-    def fake_meshy_grid(session, prompt, *, references=None, label="", on_progress=None, api_key=None):
+    """Sostituisce la generazione immagine: niente rete, scrive una griglia vera."""
+    def fake_meshy_grid(session, prompt, *, references=None, label="",
+                        aspect_ratio="1:1", clean=None, on_progress=None, api_key=None):
         return "fake://grid", "task-comp", 9
 
     def fake_save(session, component_id, version, url):
@@ -118,11 +120,12 @@ def test_breakdown_produces_bundle(accepted_session: Path, monkeypatch) -> None:
 
     # contratto di handoff: prompt principale + viste design
     assert data["main_prompt"].startswith("A squat ceramic teapot")
-    assert set(data["design_views"]) == {"front", "three_quarter", "side", "back"}
+    assert data["view_schema"] == "object_2x3q"
+    assert set(data["design_views"]) == {"front_3q", "rear_3q"}
 
     for comp in data["components"]:
-        # 4 viste per componente, esistenti su disco
-        assert set(comp["views"]) == {"front", "three_quarter", "side", "back"}
+        # 2 viste 3/4 per componente, esistenti su disco
+        assert set(comp["views"]) == {"front_3q", "rear_3q"}
         for rel in comp["views"].values():
             assert (accepted_session / rel).exists()
         assert comp["version"] == 1

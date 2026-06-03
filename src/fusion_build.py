@@ -27,7 +27,7 @@ import shutil
 from datetime import datetime
 from pathlib import Path
 
-from . import config, image_lenses, storage
+from . import config, image_lenses, storage, view_schema
 
 FUSION_OUTPUTS_ROOT = config.OUTPUTS_ROOT / "fusion"
 
@@ -38,22 +38,19 @@ FUSION_OUTPUTS_ROOT = config.OUTPUTS_ROOT / "fusion"
 ACCEPT_THRESHOLD = 85
 MAX_ITERATIONS = 2
 
-# Quadranti del grid 2x2 prodotti dalla pipeline Oggetti (vedi src/grid_utils.py
-# GRID_QUADRANTS). Sono le 4 viste di riferimento per la ricostruzione.
-VIEW_NAMES = ("front", "three_quarter", "side", "back")
+# Le viste di riferimento e le loro pose di camera NON sono più cablate qui:
+# vengono dallo ViewSchema della sessione Oggetti sorgente (src/view_schema.py).
+# La build session salva la propria `view_schema` in metadata; gli helper sotto
+# risolvono nomi e pose da lì (fallback legacy 4-viste). La posa camera Fusion
+# di ogni vista è in ViewSpec.fusion_camera ({view_dir, up, ortho}); il view_dir è
+# il verso di sguardo (eye→target), up=+Z; le 3/4 sono isometriche (ortho=False).
 
-# Hint di camera Fusion per ogni vista, usato per orientare il render di verifica
-# (`viewport.camera` + `saveAsImageFile`). A differenza di Blender (`view_axis`)
-# Fusion non ha "assi" di vista: si imposta la direzione di sguardo della camera.
-# Convenzione di build (vedi SKILL §3): up = +Z, "fronte" rivolto verso -Y.
-# La direzione è il VERSO DI SGUARDO della camera (da eye→target). "three_quarter"
-# è una isometrica fissa, così il render è deterministico e confrontabile coi ref.
-VIEW_CAMERA = {
-    "front": {"view_dir": [0, 1, 0], "up": [0, 0, 1], "ortho": True},
-    "three_quarter": {"view_dir": [1, 1, -1], "up": [0, 0, 1], "ortho": False},
-    "side": {"view_dir": [-1, 0, 0], "up": [0, 0, 1], "ortho": True},
-    "back": {"view_dir": [0, -1, 0], "up": [0, 0, 1], "ortho": True},
-}
+
+def _build_schema(build_dir: Path) -> view_schema.ViewSchema:
+    """ViewSchema della build session, dalla key salvata in metadata (fallback
+    legacy 4-viste per build precedenti all'astrazione)."""
+    meta = _load_metadata(build_dir)
+    return view_schema.get_schema(meta.get("view_schema"))
 
 
 def _patch_metadata(build_dir: Path, mutate) -> dict:
@@ -71,13 +68,16 @@ def _patch_metadata(build_dir: Path, mutate) -> dict:
     return data
 
 
-def _find_view_crops(source_dir: Path, meta: dict) -> dict[str, Path]:
-    """Risolve i 4 crop del grid 2x2 nella sessione Oggetti sorgente.
+def _find_view_crops(
+    source_dir: Path, meta: dict, schema: view_schema.ViewSchema
+) -> dict[str, Path]:
+    """Risolve i crop delle viste nella sessione Oggetti sorgente, secondo `schema`.
 
     Preferisce i path dichiarati nell'iterazione accettata (o l'ultima), poi
-    ripiega sul naming `images/NN_grid_<quadrant>.png` cercando la versione più
+    ripiega sul naming `images/NN_grid_<view>.png` cercando la versione più
     recente. Solleva FileNotFoundError se manca anche una sola vista.
     """
+    names = schema.names
     iters = meta.get("iterations") or []
     accepted = meta.get("accepted_iteration")
     chosen = None
@@ -88,40 +88,41 @@ def _find_view_crops(source_dir: Path, meta: dict) -> dict[str, Path]:
 
     views: dict[str, Path] = {}
     # 1) path espliciti dichiarati in metadata (image_paths_grid: lista ordinata
-    #    front/three_quarter/side/back come GRID_QUADRANTS).
+    #    secondo lo schema viste della sessione).
     declared = (chosen or {}).get("image_paths_grid") or []
-    if len(declared) == len(VIEW_NAMES):
-        for name, rel in zip(VIEW_NAMES, declared):
+    if len(declared) == len(names):
+        for name, rel in zip(names, declared):
             p = source_dir / rel
             if p.exists():
                 views[name] = p
 
-    # 2) fallback: glob per quadrante, versione più alta.
-    for name in VIEW_NAMES:
+    # 2) fallback: glob per vista, versione più alta.
+    for name in names:
         if name in views:
             continue
         candidates = sorted(source_dir.glob(f"images/*_grid_{name}.png"))
         if candidates:
             views[name] = candidates[-1]
 
-    missing = [n for n in VIEW_NAMES if n not in views]
+    missing = [n for n in names if n not in views]
     if missing:
         raise FileNotFoundError(
             f"Viste mancanti nella sessione sorgente {source_dir.name}: "
-            f"{', '.join(missing)}. Serve una sessione Oggetti con grid 2x2 generato."
+            f"{', '.join(missing)}. Serve una sessione Oggetti con la griglia generata."
         )
     return views
 
 
 def load_source_inputs(source_dir: Path) -> dict:
-    """Estrae descrizione + 4 viste da una sessione Oggetti esistente.
+    """Estrae descrizione + viste da una sessione Oggetti esistente.
 
-    Ritorna {prompt, views: {front, three_quarter, side, back}, version,
+    Ritorna {prompt, views: {view: Path}, view_schema: key, version,
     source_session}. Non copia nulla: i path puntano alla sessione sorgente.
     """
     source_dir = source_dir.resolve()
     meta = storage.load_metadata(source_dir)
-    views = _find_view_crops(source_dir, meta)
+    schema = view_schema.resolve_object_schema(meta)
+    views = _find_view_crops(source_dir, meta, schema)
 
     iters = meta.get("iterations") or []
     accepted = meta.get("accepted_iteration")
@@ -143,13 +144,14 @@ def load_source_inputs(source_dir: Path) -> dict:
     return {
         "prompt": prompt,
         "views": views,
+        "view_schema": schema.key,
         "version": version,
         "source_session": source_dir.name,
     }
 
 
 def init_build_session(source_dir: Path) -> Path:
-    """Crea outputs/fusion/<ts-slug>/, copia le 4 viste in refs/, scrive
+    """Crea outputs/fusion/<ts-slug>/, copia le viste in refs/, scrive
     prompts/00_source.txt e lo skeleton di metadata.json. Ritorna la build dir.
     """
     src = load_source_inputs(source_dir)
@@ -189,6 +191,7 @@ def init_build_session(source_dir: Path) -> Path:
         "prompt": src["prompt"],
         "manifest_path": "manifest.json",
         "plan_path": "plan.json",
+        "view_schema": src["view_schema"],
         "views": view_rel,
         "ref_lenses": ref_lenses,
         "steps": [],
@@ -420,7 +423,7 @@ def eval_paths(build_dir: Path, iteration: int | None = None) -> dict:
     base.mkdir(parents=True, exist_ok=True)
     return {
         "iteration": iteration,
-        "views": {name: str(base / f"{name}.png") for name in VIEW_NAMES},
+        "views": {name: str(base / f"{name}.png") for name in _build_schema(build_dir).names},
         "verdict": str(base / "verdict.json"),
     }
 
@@ -447,8 +450,9 @@ def make_lenses(build_dir: Path, iteration: int | None = None) -> dict:
     descrizione/confronto più accurati. Ritorna {"lenses": {view: {lens: abs}}}.
     """
     build_dir = build_dir.resolve()
+    names = _build_schema(build_dir).names
     if iteration is None:
-        views = {n: build_dir / "refs" / f"{n}.png" for n in VIEW_NAMES}
+        views = {n: build_dir / "refs" / f"{n}.png" for n in names}
         abs_map = image_lenses.generate_lenses(
             {n: p for n, p in views.items() if p.exists()},
             build_dir / "refs" / "lenses",
@@ -457,7 +461,7 @@ def make_lenses(build_dir: Path, iteration: int | None = None) -> dict:
         _patch_metadata(build_dir, lambda d: d.update(ref_lenses=_rel_lenses(build_dir, abs_map)))
     else:
         evd = (build_dir / "eval" / f"iter_{iteration:02d}").resolve()
-        views = {n: evd / f"{n}.png" for n in VIEW_NAMES}
+        views = {n: evd / f"{n}.png" for n in names}
         abs_map = image_lenses.generate_lenses(
             {n: p for n, p in views.items() if p.exists()},
             evd / "lenses",
@@ -539,10 +543,11 @@ def reinit_from_result(prev_build_dir: Path) -> dict:
     (build_dir / "refs").mkdir(parents=True, exist_ok=True)
     (build_dir / "steps").mkdir(parents=True, exist_ok=True)
 
-    # input invariati: stessi 4 refs della build precedente
+    # input invariati: stessi refs della build precedente (stesso schema viste)
+    schema_key = prev_meta.get("view_schema")
     view_rel: dict[str, str] = {}
     copied: dict[str, Path] = {}
-    for name in VIEW_NAMES:
+    for name in view_schema.get_schema(schema_key).names:
         src_ref = prev_build_dir / "refs" / f"{name}.png"
         if src_ref.exists():
             dst = build_dir / "refs" / f"{name}.png"
@@ -584,6 +589,7 @@ def reinit_from_result(prev_build_dir: Path) -> dict:
         "prompt": prev_meta.get("prompt"),
         "manifest_path": "manifest.json" if has_manifest else None,
         "plan_path": "plan.json",
+        "view_schema": schema_key,
         "views": view_rel,
         "ref_lenses": ref_lenses,
         "steps": [],

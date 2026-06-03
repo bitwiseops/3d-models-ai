@@ -1,6 +1,6 @@
 ---
 name: fusion-build-from-components
-description: Costruisce in modo INCREMENTALE un modello 3D PARAMETRICO in Fusion 360 (live, via MCP) a partire da una sessione Oggetti già SCOMPOSTA in COMPONENTI (cartella `components/` con `components.json` + 4 viste per ciascun componente, prodotta dallo stadio web `breakdown`). Variante di fusion-build con lo STESSO backend di costruzione (tool CAD granulari del server faust-machines + `execute_code` solo per render/bbox) e lo stesso gate, ma con un nuovo stadio di ACTION-PLAN (come fusion-build-from-transcript) prima della costruzione: l'inventario dei componenti SOSTITUISCE le sole 4 viste dell'intero oggetto. Insight: ogni componente è una PARTE già identificata, con le SUE 4 viste e la SUA interfaccia di accoppiamento → il parsing è soprattutto mapping componenti→manifest + inferenza dei JOINT inter-componente dalle relazioni dichiarate e dall'immagine whole-object. Parte in AUTO MODE all'invocazione. Un parser Opus mappa i componenti su un PART-MANIFEST, un planner Opus mappa l'action-plan sui tool granulari Fusion costruendo ogni componente come Component separato, executor Sonnet in sequenza eseguono ogni step auto-verificandosi con render della viewport e assemblano i pezzi con JOINTS secondo l'assembly_order. Termina con un GATE DI CONVERGENZA che confronta il modello assemblato sia col design whole-object sia con le immagini per-componente, e raccomanda in modo deterministico stop o re-iterazione. USARE quando l'utente chiede di "costruire/modellare in Fusion DA(I) COMPONENTI" una sessione già scomposta. PRECONDIZIONE: Fusion 360 aperto su macOS/Windows, add-in MCP abilitato e server raggiungibile (setup in `run/README.md`); sessione sorgente con `components/components.json` (lanciare prima lo stadio `breakdown`).
+description: Costruisce in modo INCREMENTALE un modello 3D PARAMETRICO in Fusion 360 (live, via MCP) a partire da una sessione Oggetti già SCOMPOSTA in COMPONENTI (cartella `components/` con `components.json` + le viste 3/4 per ciascun componente, prodotta dallo stadio web `breakdown`). Variante di fusion-build con lo STESSO backend di costruzione (tool CAD granulari del server faust-machines + `execute_code` solo per render/bbox) e lo stesso gate, ma con un nuovo stadio di ACTION-PLAN (come fusion-build-from-transcript) prima della costruzione: l'inventario dei componenti SOSTITUISCE le sole viste dell'intero oggetto. Insight: ogni componente è una PARTE già identificata, con le SUE viste 3/4 e la SUA interfaccia di accoppiamento → il parsing è soprattutto mapping componenti→manifest + inferenza dei JOINT inter-componente dalle relazioni dichiarate e dall'immagine whole-object. Parte in AUTO MODE all'invocazione. Un parser Opus mappa i componenti su un PART-MANIFEST, un planner Opus mappa l'action-plan sui tool granulari Fusion costruendo ogni componente come Component separato, executor Sonnet in sequenza eseguono ogni step auto-verificandosi con render della viewport e assemblano i pezzi con JOINTS secondo l'assembly_order. Termina con un GATE DI CONVERGENZA che confronta il modello assemblato sia col design whole-object sia con le immagini per-componente, e raccomanda in modo deterministico stop o re-iterazione. USARE quando l'utente chiede di "costruire/modellare in Fusion DA(I) COMPONENTI" una sessione già scomposta. PRECONDIZIONE: Fusion 360 aperto su macOS/Windows, add-in MCP abilitato e server raggiungibile (setup in `run/README.md`); sessione sorgente con `components/components.json` (lanciare prima lo stadio `breakdown`).
 ---
 
 # fusion-build-from-components — costruzione parametrica da oggetto scomposto in componenti
@@ -8,13 +8,20 @@ description: Costruisce in modo INCREMENTALE un modello 3D PARAMETRICO in Fusion
 Pipeline a **più stadi** orchestrata da Claude Code (questo agente) sui **tool CAD granulari** del
 server MCP Fusion (faust-machines): **action-plan → parsing → piano → esecuzione → chiusura → gate**.
 Input: una sessione Oggetti **già scomposta** (`outputs/<ts-slug>/components/components.json` +, per
-ogni componente, i 4 crop del suo grid 2x2). Output: modello Fusion **parametrico** (B-rep) in cui
-**ogni componente è un Component** costruito dalle sue 4 viste e **assemblato con JOINTS**, con
+ogni componente, i crop delle sue viste 3/4). Output: modello Fusion **parametrico** (B-rep) in cui
+**ogni componente è un Component** costruito dalle sue viste e **assemblato con JOINTS**, con
 storico `.f3d` per ogni step.
+
+> Le sessioni Oggetti correnti usano **due viste 3/4** (`front_3q`, `rear_3q`) per l'intero oggetto e
+> per ogni componente (layout 1x2). I nomi e il numero delle viste **non sono cablati**: leggili da
+> `metadata['views']` (whole) e `metadata['component_views']` (per-componente), e dai file in `refs/`
+> e `refs/components/<id>/`. **Sessioni scomposte vecchie possono avere ancora 4 viste (schema
+> legacy: front/three_quarter/side/back); leggi i nomi reali da components.json / metadata, non
+> assumerli.**
 
 > **Variante di `fusion-build`.** Tutto il layer di costruzione geometrica (sketch→extrude/revolve,
 > feature native, joints), il render di verifica, le metriche e la regola del gate sono **identici**
-> a fusion-build. Cambia l'**input** (un bundle di componenti invece delle sole 4 viste dell'intero
+> a fusion-build. Cambia l'**input** (un bundle di componenti invece delle sole viste dell'intero
 > oggetto) e si aggiunge uno **stadio di ACTION-PLAN** (§0.5) prima del parsing — analogo all'action-log
 > di `fusion-build-from-transcript`, ma **segmentato per componente** invece che derivato da un
 > transcript piatto. `fusion-build` e `fusion-build-from-transcript` restano indipendenti e invariati.
@@ -53,10 +60,11 @@ nella web UI).
 ## Layout della build dir (importante)
 
 `init` crea `outputs/fusion/<ts-slug>/` con:
-- `refs/<view>.png` → le 4 viste dell'**INTERO oggetto** (whole). **Stessa posizione di fusion-build**,
-  così il gate (eval render ↔ `refs/<view>.png`), make-lenses e reinit funzionano invariati.
-- `refs/components/<id>/<view>.png` → le 4 viste di **ogni componente** (riferimento PRIMARIO di forma
-  per lo step che costruisce quel componente).
+- `refs/<view>.png` → le viste dell'**INTERO oggetto** (whole; correnti: `front_3q.png`,
+  `rear_3q.png`). **Stessa posizione di fusion-build**, così il gate (eval render ↔ `refs/<view>.png`),
+  make-lenses e reinit funzionano invariati. I nomi reali sono in `metadata['views']`.
+- `refs/components/<id>/<view>.png` → le viste di **ogni componente** (riferimento PRIMARIO di forma
+  per lo step che costruisce quel componente). I nomi reali sono in `metadata['component_views']`.
 - `refs/lenses/` e `refs/components/<id>/lenses/` → lenti percettive (edges/silhouette/color).
 - `components_source.json` → copia del bundle sorgente (per parser/planner).
 - `metadata.json` con `components` (schede), `component_views`, `views` (whole), `status`.
@@ -113,8 +121,10 @@ l'action-plan si produce con **una singola passata di consolidamento Opus** (nie
    `components_source.json`, scrive `metadata.json` (**status=preprocessing**).
 2. Lancia **un** subagent **action-plan** (Agent, `subagent_type: general-purpose`, `model: opus`,
    sola percezione: `Read` + `Write`, **niente MCP**) col **template action-plan** sotto. Legge
-   `components_source.json` + le 4 viste whole (`refs/<view>.png`) + le 4 viste di ogni componente
-   (`refs/components/<id>/<view>.png`) + le lenti, e produce `action-plan.json` (schema sotto).
+   `components_source.json` + le viste whole (`refs/<view>.png`) + le viste di ogni componente
+   (`refs/components/<id>/<view>.png`) + le lenti, e produce `action-plan.json` (schema sotto). Itera
+   sulle viste che esistono in `metadata['views']`/`metadata['component_views']` (correnti: `front_3q`,
+   `rear_3q`), non assumerne il numero.
 3. Salva l'action-plan (porta lo stato `preprocessing → parsing`):
    ```
    uv run python -m src.fusion_build_from_components save-action-plan <build_dir> <action-plan.json>
@@ -127,14 +137,14 @@ Schema `action-plan.json` (segmentato per componente + joints inter-componente).
 {
   "schema_version": 1,
   "source_session": "<name>",
-  "strategy": "Ogni componente = un Component Fusion costruito dalle sue 4 viste (sketch→extrude/revolve, esatto per costruzione, simmetria via mirror); poi assembla i componenti con JOINTS relativi secondo le relazioni dichiarate e l'assembly_order; quote in cm, proporzionali.",
+  "strategy": "Ogni componente = un Component Fusion costruito dalle sue viste 3/4 (sketch→extrude/revolve, esatto per costruzione, simmetria via mirror); poi assembla i componenti con JOINTS relativi secondo le relazioni dichiarate e l'assembly_order; quote in cm, proporzionali.",
   "components": [
     {
       "component_id": "body",
       "name": "Teapot body",
       "build_order": 1,
       "actions": [
-        {"op": "sketch_revolve", "detail": "profilo metà-sezione sul piano XZ → revolve attorno a Z", "reference_views": ["front", "side"]},
+        {"op": "sketch_revolve", "detail": "profilo metà-sezione sul piano XZ → revolve attorno a Z", "reference_views": ["front_3q", "rear_3q"]},
         {"op": "shell", "detail": "cavità interna, spessore ~2mm"},
         {"op": "fillet", "detail": "raccordo bordo superiore"}
       ],
@@ -143,7 +153,7 @@ Schema `action-plan.json` (segmentato per componente + joints inter-componente).
   ],
   "joints": [
     {"from": "lid", "to": "body", "relation": "concentric_with", "joint_type": "cylindrical",
-     "detail": "flangia del coperchio dentro il collo del corpo", "from_view_evidence": ["whole/front"]}
+     "detail": "flangia del coperchio dentro il collo del corpo", "from_view_evidence": ["whole/front_3q"]}
   ],
   "assembly_order": ["body", "spout", "handle", "lid"],
   "open_questions": ["beccuccio: curva singola o composta?"]
@@ -161,14 +171,17 @@ inside→concentric+planar, symmetric_to→mirror.
 >
 > BUNDLE COMPONENTI: {components_source.json} (id, name, description, relations, relative_scale,
 >   interface per ogni componente; + main_subject + design_views)
-> VISTE WHOLE (Read): {refs/front.png, refs/three_quarter.png, refs/side.png, refs/back.png} (+ lenti
->   in refs/lenses/) — l'oggetto INTERO assemblato: usale per capire come i pezzi si montano tra loro.
-> VISTE PER COMPONENTE (Read): {refs/components/<id>/<view>.png} (+ lenti) — ogni componente ISOLATO:
->   usale per capire la forma/azioni di costruzione del singolo pezzo.
+> VISTE WHOLE (Read): {refs/<view>.png per ogni view in metadata['views'] — correnti: refs/front_3q.png,
+>   refs/rear_3q.png} (+ lenti in refs/lenses/) — l'oggetto INTERO assemblato: usale per capire come i
+>   pezzi si montano tra loro.
+> VISTE PER COMPONENTE (Read): {refs/components/<id>/<view>.png per ogni view in
+>   metadata['component_views']} (+ lenti) — ogni componente ISOLATO: usale per capire la forma/azioni
+>   di costruzione del singolo pezzo.
 >
 > Procedura:
 > 1. Per OGNI componente, decidi la **sequenza di azioni CAD** (`actions[]`) per costruirlo dalle sue
->    4 viste: scegli `op` (sketch_extrude / sketch_revolve / loft / sweep / shell / fillet / chamfer /
+>    viste (NON assumere quante: usa quelle presenti): scegli `op` (sketch_extrude / sketch_revolve /
+>    loft / sweep / shell / fillet / chamfer /
 >    hole / mirror / pattern …), un `detail` conciso, e le `reference_views` pertinenti. Privilegia
 >    l'**esatto per costruzione** (sketch vincolato → extrude/revolve), simmetria via mirror.
 > 2. Assegna `build_order` (i pezzi target di un joint vanno costruiti prima dei pezzi che vi si
@@ -184,7 +197,7 @@ inside→concentric+planar, symmetric_to→mirror.
 ## 1. Parsing → PART-MANIFEST (parser = Opus subagent, MAPPING, sola percezione)
 
 Qui il parsing è **più leggero** che in fusion-build: i componenti sono **già identificati**, ognuno
-con le sue 4 viste. Il parser **mappa** ogni componente su una parte del manifest e **conferma/infierisce**
+con le sue viste 3/4. Il parser **mappa** ogni componente su una parte del manifest e **conferma/infierisce**
 le relazioni inter-componente leggendo le viste whole. Il manifest resta la **single source of truth**
 (schema identico a fusion-build) così tutti gli helper condivisi (save-manifest, plan_coverage, gate
 `parts_check`) funzionano invariati.
@@ -207,7 +220,7 @@ Schema `manifest.json` (identico a fusion-build; parametri **relativi/proporzion
       "parameters": {"shape": "...", "proportions": "..."},
       "relations": [{"type": "attached_to|on_top_of|inside|concentric_with|flush_with|symmetric_to", "target_id": "lid", "detail": "..."}],
       "details": ["..."],
-      "source_views": ["front", "side"],
+      "source_views": ["front_3q", "rear_3q"],
       "confidence": "high|medium|low"
     }
   ],
@@ -230,7 +243,7 @@ Schema `manifest.json` (identico a fusion-build; parametri **relativi/proporzion
 >
 > Procedura:
 > 1. Per ogni componente del bundle crea UNA parte: `id` = component_id; `primitive_type` = la
->    primitiva più vicina dedotta dalle SUE 4 viste; `parameters` proporzionali; `details` geometrici
+>    primitiva più vicina dedotta dalle SUE viste 3/4; `parameters` proporzionali; `details` geometrici
 >    (raccordi, fori, scanalature, interfaccia di accoppiamento); `source_views` = le viste del
 >    componente; `confidence`.
 > 2. `relations`: parti dalle relazioni dichiarate nel bundle e **verificale/completale** guardando le
@@ -271,7 +284,7 @@ Schema `plan.json` (identico a fusion-build), esempio di step:
       "fusion_approach": "Sketch profilo metà-sezione su XZ → REVOLVE attorno a Z; shell ~2mm; fillet bordo",
       "features": ["sketch", "revolve", "shell", "fillet"],
       "joints": [],
-      "reference_views": ["components/body/front", "components/body/side", "front"],
+      "reference_views": ["components/body/front_3q", "components/body/rear_3q", "front_3q"],
       "depends_on": [],
       "acceptance": "silhouette del corpo combacia con refs/components/body/*; corpo di rivoluzione attorno a Z"
     },
@@ -281,7 +294,7 @@ Schema `plan.json` (identico a fusion-build), esempio di step:
       "fusion_approach": "Sketch+revolve del coperchio come Component separato; poi add_joint cylindrical al collo del corpo",
       "features": ["sketch", "revolve", "joint"],
       "joints": [{"target_part": "body", "joint_type": "cylindrical", "notes": "flangia coperchio concentrica al collo"}],
-      "reference_views": ["components/lid/front", "front"],
+      "reference_views": ["components/lid/front_3q", "front_3q"],
       "depends_on": [1],
       "acceptance": "coperchio presente, concentrico al collo, poggiato sul bordo"
     }
@@ -303,8 +316,9 @@ Per ogni step in ordine:
 2. Lancia **un** subagent executor (Agent, `subagent_type: general-purpose`,
    tool `mcp__fusion__*` + `mcp__fusion__execute_code` *(solo render/bbox)* + Write, `model: sonnet`)
    col **template executor** sotto, passando: piano completo, step corrente, le parti del manifest in
-   `step.manifest_parts`, **le 4 viste del COMPONENTE** (`refs/components/<id>/<view>.png`) come
-   riferimento PRIMARIO di forma + le viste whole come contesto, e i path artefatti.
+   `step.manifest_parts`, **le viste del COMPONENTE** (`refs/components/<id>/<view>.png`, quelle in
+   `metadata['component_views']`) come riferimento PRIMARIO di forma + le viste whole come contesto, e
+   i path artefatti.
 3. Registra: `uv run python -m src.fusion_build_from_components record <build_dir> <record.json>`.
 4. Step successivo.
 
@@ -331,11 +345,18 @@ relativo); ammesso solo come fallback ultimo documentato nelle `notes`.
 
 ### Render di verifica (pose ESATTE — identico a fusion-build)
 
-Convenzione di build: **up = +Z, "fronte" verso −Y**. Render = unico uso di `execute_code`: per ogni
-vista imposta `app.activeViewport.camera` (ortografica per front/side/back, isometrica per
-three_quarter), `viewport.fit()`, poi `saveAsImageFile`. Le direzioni canoniche sono in
-`src/fusion_build.py` `VIEW_CAMERA` (front=+Y, side=−X, back=−Y, three_quarter=iso) — **le stesse**
-negli step e nel gate. Per le firme `adsk` fai lookup nella doc locale (§"Documentazione API locale").
+Convenzione di build: **up = +Z**. Render = unico uso di `execute_code`: per ogni vista imposta
+`app.activeViewport.camera`, `viewport.fit()`, poi `saveAsImageFile`. Le pose canoniche sono in
+`src/view_schema.py` (`ViewSpec.fusion_camera`), risolte dallo schema della sessione, e in
+`src/fusion_build.py` `VIEW_CAMERA` — **le stesse** negli step e nel gate. Le due viste 3/4 correnti:
+
+| view      | view_dir      | up        | ortho |
+|-----------|---------------|-----------|-------|
+| `front_3q`| `[1, 1, -1]`  | `[0,0,1]` | False |
+| `rear_3q` | `[-1, -1, -1]`| `[0,0,1]` | False |
+
+Itera sulle viste reali della sessione (NON assumere il numero/i nomi). Per le firme `adsk` fai
+lookup nella doc locale (§"Documentazione API locale").
 
 ### Template prompt per l'executor (Sonnet)
 
@@ -350,8 +371,9 @@ negli step e nel gate. Per le firme `adsk` fai lookup nella doc locale (§"Docum
 > PIANO COMPLETO (contesto): {plan.json}
 > STEP DA APPLICARE: {step}
 > PARTI DEL MANIFEST DA REALIZZARE (SSOT): {parts di step.manifest_parts}
-> VISTE DEL COMPONENTE (riferimento PRIMARIO di forma, Read): {refs/components/<id>/front.png, …}
-> VISTE WHOLE (contesto assemblaggio, Read): {refs/front.png, …}
+> VISTE DEL COMPONENTE (riferimento PRIMARIO di forma, Read): {refs/components/<id>/<view>.png per ogni
+>   view della sessione — correnti: front_3q.png, rear_3q.png}
+> VISTE WHOLE (contesto assemblaggio, Read): {refs/<view>.png — correnti: refs/front_3q.png, …}
 > PATH ARTEFATTI (assoluti, usali esattamente): f3d={…} stl={…} png={…} json={…}
 >
 > VINCOLI HARD: unità cm (1 mm = 0.1 cm); una operazione per chiamata; budget ~30s (spezza se pesante);
@@ -365,7 +387,8 @@ negli step e nel gate. Per le firme `adsk` fai lookup nella doc locale (§"Docum
 >    Costruiscilo guardando le **viste del componente** (la sua forma isolata).
 > 3. Se `step.joints` non è vuoto: **posiziona con `add_joint`** (mappa relazioni→joint) referenziando
 >    geometria stabile; verifica nelle **viste whole** che combaci l'assemblaggio. **NON** `move_body`.
-> 4. Verifica (via `execute_code`): rendi le `reference_views` con le pose canoniche (`VIEW_CAMERA`),
+> 4. Verifica (via `execute_code`): rendi le `reference_views` con le pose canoniche (`fusion_camera`
+>    dello schema / `VIEW_CAMERA`; front_3q=view_dir[1,1,-1], rear_3q=view_dir[-1,-1,-1], up=+Z),
 >    `viewport.fit()`, `saveAsImageFile`; apri i png con Read e giudica forma/simmetria del componente
 >    (vs le sue viste) e, se ha joint, dell'assemblaggio (vs whole) rispetto ad `acceptance`.
 > 5. RIPETI fino a max 3 tentativi. A ogni retry: `undo`/ri-quota/riapri `.f3d`; poi ri-verifica.
@@ -396,12 +419,14 @@ il modello assemblato **sia col design whole-object sia con le immagini per-comp
    ```
    uv run python -m src.fusion_build_from_components eval-paths <build_dir>
    ```
-   → `{"iteration": N, "views": {front,three_quarter,side,back → png}, "verdict": "...abs..."}`.
+   → `{"iteration": N, "views": {<view> → png per ogni vista whole della sessione — correnti front_3q,
+   rear_3q}, "verdict": "...abs..."}`.
 2. **Metriche oggettive** (via `execute_code`, in cm → ×10 = mm): bbox vs `target_mm`
    (`proportion_error_pct`), scarto di simmetria per asse (`symmetry_dev_mm`), `watertight` (export STL
    + trimesh e/o `body.isSolid`). Identiche a fusion-build.
-3. **Render delle 4 viste whole** del modello assemblato (pose canoniche `VIEW_CAMERA`) in `views[...]`,
-   poi genera le lenti dei render:
+3. **Render delle viste whole** del modello assemblato (tutte quelle della sessione, pose canoniche
+   `fusion_camera`/`VIEW_CAMERA`; correnti front_3q/rear_3q) in `views[...]`, poi genera le lenti dei
+   render:
    ```
    uv run python -m src.fusion_build_from_components make-lenses <build_dir> --iter N
    ```
@@ -429,7 +454,7 @@ Schema `verdict.json` (come fusion-build; `parts_check` per-componente, con note
               "proportion_error_pct": 1.2, "symmetry_dev_mm": {"x":0.0,"z":0.4}, "watertight": true},
   "parts_check": [{"id":"body","present":true,"relations_ok":true,"notes":"ok"},
                   {"id":"lid","present":true,"relations_ok":false,"notes":"presente ma joint non concentrico"}],
-  "views": [{"view":"front","score":92,"notes":"..."}, {"view":"side","score":88,"notes":"..."}],
+  "views": [{"view":"front_3q","score":92,"notes":"..."}, {"view":"rear_3q","score":88,"notes":"..."}],
   "overall_score": 88,
   "actionable_gaps": ["coperchio non concentrico al collo (joint cylindrical da rivedere)"]
 }
@@ -450,13 +475,14 @@ Schema `verdict.json` (come fusion-build; `parts_check` per-componente, con note
 > differenze GEOMETRICHE concrete e correggibili (es. "coperchio non concentrico", "manca il manico",
 > "beccuccio troppo corto").
 >
-> VISTE WHOLE (render ↔ ref, con lenti): {front: <render>+<lenses> ↔ <refs/front.png>+<refs/lenses/...>, …}
+> VISTE WHOLE (render ↔ ref, con lenti, una per ogni vista della sessione — correnti front_3q, rear_3q):
+>   {front_3q: <render>+<lenses> ↔ <refs/front_3q.png>+<refs/lenses/...>, …}
 > VISTE PER COMPONENTE (ref isolate): {refs/components/<id>/<view>.png}
 > MANIFEST: {manifest.json}  BUNDLE: {components_source.json}
 > METRICHE (contesto): {bbox_mm, target_mm, symmetry_dev_mm, watertight}
 >
 > RITORNA come testo finale SOLO il JSON:
-> `{"views":[{"view":"front","score":N,"notes":"..."}, ...],
+> `{"views":[{"view":"front_3q","score":N,"notes":"..."}, ...],
 >   "parts_check":[{"id":"...","present":bool,"relations_ok":bool,"notes":"..."}, ...],
 >   "overall_score":N, "actionable_gaps":["..."]}`
 > dove `overall_score` penalizza forte errori di proporzione/simmetria, parti mancanti e joint errati.
