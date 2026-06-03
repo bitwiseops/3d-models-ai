@@ -118,6 +118,7 @@ REGOLA CONCETTUALE
 Descrivi l'oggetto come SOGGETTO FOTOGRAFATO REALMENTE, non come render 3D né come oggetto già stampato. NON usare "low-poly", "3D render", "CGI", "stylized", "miniature toy", "3D printed look", "polygonal facets", "blender render" — A MENO CHE l'utente non chieda esplicitamente quello stile. Se l'utente dice "fungo porcino" descrivi un fungo porcino reale, non una statuetta stilizzata.
 
 NON INCLUDERE accessori legati all'uso finale (anelli per portachiavi, basi extra, fori per appendere, magneti, viti, supporti) salvo richiesta esplicita: il 3D dovrà contenere il SOGGETTO puro; ganci/forature vengono aggiunti dopo in post-modeling.
+ECCEZIONE — REFERENCE: se ti viene fornita un'immagine di reference, gli elementi STRUTTURALI che vi compaiono come parte integrante dell'oggetto (base, piedini, supporti, montanti, telaio, manici, ghiere) NON sono "accessori": vanno PRESERVATI e descritti, perché definiscono l'oggetto mostrato. La regola di omissione qui sopra vale solo per elementi d'uso finale NON presenti nella reference (es. un anello portachiavi da aggiungere). In presenza di reference, riproduci la composizione COMPLETA che vedi, non una versione semplificata.
 
 EVITA materiali altamente riflettenti, trasparenti o con subsurface scattering (vetro liscio, acqua, pelle umana realistica) salvo necessità: confondono la depth estimation. Se l'utente li chiede, traducili in equivalenti matte ("frosted matte glass, fully opaque").
 
@@ -368,7 +369,11 @@ def refine_initial(idea: str, references: list[Path] | None = None) -> str:
                 "proporzioni, palette, materiali, dettagli distintivi — producendo "
                 "il soggetto descritto dall'idea (non una copia letterale delle "
                 "reference). Indica nella descrizione quali aspetti delle reference "
-                "stai preservando e quali stai adattando. Ricorda: SOLO il soggetto, "
+                "stai preservando e quali stai adattando. PRESERVA gli elementi "
+                "STRUTTURALI mostrati nella reference (base, piedini, supporti, "
+                "montanti, telaio, manici): fanno parte dell'oggetto, NON sono "
+                "accessori da omettere — riproduci la composizione COMPLETA, non "
+                "una versione semplificata. Ricorda: SOLO il soggetto, "
                 "niente layout/camera/lighting (gestiti dallo staging fisso)."
             ),
         }
