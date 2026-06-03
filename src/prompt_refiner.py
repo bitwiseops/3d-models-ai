@@ -68,68 +68,42 @@ OUTPUT
 # superficie con forti indizi di profondità e sono più facili da mantenere
 # coerenti tra loro. (Layout/angoli canonici in src/view_schema.OBJECT_VIEWS.)
 OBJECT_GRID_STAGING_BLOCK = (
-    "Studio product photography composed as a 1x2 horizontal layout on a 16:9 "
-    "canvas (~2048x1152), two equal cells side by side separated by a thin "
-    "vertical gutter the exact "
-    "color of the background; the LEFT cell is a front three-quarter view with "
-    "the object rotated ~35 degrees around the vertical axis so its front face "
-    "and one flank are both clearly visible, tilted ~10 degrees downward; the "
-    "RIGHT cell is a rear three-quarter view of the SAME object rotated ~215 "
-    "degrees so its back face and the opposite flank are both visible, at "
-    "identical scale, camera height, distance, lighting, background and "
-    "materials, bases aligned on the same horizontal line, the subject occupying "
-    "~70-80% of each cell, fully visible, never cropped. Long-tele lens "
-    "85-135mm equivalent to minimize perspective distortion, pure white "
-    "(#FFFFFF) or very light neutral-grey seamless studio background with no "
-    "gradient, no texture, no floor, no props; soft diffuse three-point lighting "
-    "(soft key + fill + gentle rim), only very faint contact shadows, no hard "
-    "cast shadows on background or under the object (hard shadows are read as "
-    "geometry by the 3D reconstructor); neutral exposure, no DOF, no bokeh, no "
-    "motion blur, no dutch tilt, no lens flare, no vignette. Both cells must "
-    "depict exactly the same physical object with perfectly consistent geometry, "
-    "proportions, colors and details across the two views; any hole, slot, "
-    "cut-out, recess or opening that passes ALL THE WAY THROUGH the object must "
-    "appear in BOTH views at mutually corresponding positions (a through-hole "
-    "seen on the front view must show its matching opening on the rear view, and "
-    "you must be able to see straight through it); never add a feature in one "
-    "view that is missing in the other unless it physically lies only on a face "
-    "that is visible in that single view. No labels, captions, arrows, numbers, watermarks, "
-    "decorative borders. The image will be split into 2 separate three-quarter "
-    "views and fed to a multi-image-to-3D model as a blueprint for 3D printing. "
-    "Subject:"
+    "Studio product photography on a 16:9 canvas (~2048x1152): two equal cells "
+    "side by side, split by a thin vertical gutter the colour of the background. "
+    "Both cells show the SAME object as a three-quarter view at IDENTICAL camera "
+    "height, elevation, tilt, scale, distance and lighting — only the rotation "
+    "differs: LEFT is a front three-quarter (rotated ~35 degrees, front face and "
+    "one flank visible), RIGHT is a rear three-quarter (rotated ~215 degrees, "
+    "back face and the opposite flank visible). Identical geometry, proportions, "
+    "colours and details in both cells; each subject fully visible (~75% of its "
+    "cell, never cropped), bases on the same line; any through-hole or opening "
+    "appears in BOTH views, see-through, at matching positions. Long-tele lens "
+    "(~85-135mm), pure white or light neutral-grey seamless background, soft "
+    "diffuse three-point lighting, only faint contact shadows, no hard shadows; "
+    "flat neutral look, no DOF/bokeh/blur/flare/vignette. No labels, captions, "
+    "arrows, numbers or watermarks. The image will be split into 2 separate views "
+    "and fed to a multi-image-to-3D model for 3D printing. Subject:"
 )
 
 
-OBJECT_GRID_SYSTEM_PROMPT = """Sei un prompt-engineer specializzato nella DESCRIZIONE DEL SOGGETTO per immagini blueprint image-to-3D di OGGETTI stampabili.
+OBJECT_GRID_SYSTEM_PROMPT = """Sei un prompt-engineer: descrivi il SOGGETTO per immagini blueprint image-to-3D di OGGETTI stampabili.
 
-CONTESTO PIPELINE (non scrivere nulla a riguardo)
-Il tuo output verrà concatenato DOPO un blocco "staging" fisso che già definisce: layout 1x2 a DUE viste three-quarter (front-¾ + rear-¾), studio neutro, lighting, lens, esclusioni di DOF / bokeh / ombre dure, etc. Quindi NON descrivere layout, griglia, camera, lighting, sfondo, lens, esposizione: sono GIÀ specificati. Limitati al SOGGETTO.
+Il tuo testo viene concatenato DOPO uno staging fisso (layout 1x2 due viste 3/4, studio, luce, lens, esclusioni): NON ripetere layout/camera/luce/sfondo/lens/viste — descrivi SOLO il soggetto.
 
-COSA DEVI SCRIVERE
-Una descrizione fisica densa e tangibile dell'oggetto che l'utente vuole, focalizzata su:
-- Forma generale e silhouette (es. "squat cylindrical body tapering to a flat top", "elongated teardrop with a flat base").
-- Proporzioni e rapporti dimensionali concreti (es. "height ~1.5x the diameter", "handle ~1/3 of body length", "wall thickness implied ~3mm").
-- Dettagli geometrici distintivi (curvature, smussi, spigoli vivi, scanalature, protrusioni, fori funzionali del soggetto stesso, simmetrie/asimmetrie). Per OGNI foro/apertura specifica SEMPRE se è PASSANTE (through-hole, aperto su entrambi i lati, si vede attraverso) o CIECO (blind, su una sola faccia): è cruciale perché le due viste 3/4 devono restare coerenti.
-- Materiali espliciti e tangibili (es. "matte injection-molded ABS", "brushed anodized aluminum", "rough unglazed terracotta with visible throw lines", "weathered oak with open grain"): diventano texture/PBR nel 3D.
-- Palette colori dichiarata (es. "ivory body with cobalt-blue accents").
-- Posa stabile e neutra (poggiato, eretto), nessuna parte sospesa o autoocclusa pesantemente.
+DESCRIVI, denso e tangibile:
+- forma e silhouette; proporzioni concrete (es. "altezza ~1.5x il diametro", "parete ~3mm");
+- geometria distintiva (curve, smussi, spigoli, scanalature, protrusioni, fori); per ogni foro indica se PASSANTE o CIECO;
+- materiali espliciti (es. "matte ABS", "ottone spazzolato", "terracotta grezza") → diventano PBR; palette colori; posa stabile e neutra.
 
-REGOLA CONCETTUALE
-Descrivi l'oggetto come SOGGETTO FOTOGRAFATO REALMENTE, non come render 3D né come oggetto già stampato. NON usare "low-poly", "3D render", "CGI", "stylized", "miniature toy", "3D printed look", "polygonal facets", "blender render" — A MENO CHE l'utente non chieda esplicitamente quello stile. Se l'utente dice "fungo porcino" descrivi un fungo porcino reale, non una statuetta stilizzata.
+NON SOVRACCARICARE: descrivi solo la geometria essenziale del soggetto richiesto; NON aggiungere ornamenti o dettagli non presenti nell'idea o nella reference.
 
-NON INCLUDERE accessori legati all'uso finale (anelli per portachiavi, basi extra, fori per appendere, magneti, viti, supporti) salvo richiesta esplicita: il 3D dovrà contenere il SOGGETTO puro; ganci/forature vengono aggiunti dopo in post-modeling.
-ECCEZIONE — REFERENCE: se ti viene fornita un'immagine di reference, gli elementi STRUTTURALI che vi compaiono come parte integrante dell'oggetto (base, piedini, supporti, montanti, telaio, manici, ghiere) NON sono "accessori": vanno PRESERVATI e descritti, perché definiscono l'oggetto mostrato. La regola di omissione qui sopra vale solo per elementi d'uso finale NON presenti nella reference (es. un anello portachiavi da aggiungere). In presenza di reference, riproduci la composizione COMPLETA che vedi, non una versione semplificata.
+Soggetto come OGGETTO REALE FOTOGRAFATO, non render/stilizzato: niente "low-poly/CGI/3D render/miniature toy" salvo richiesta esplicita.
 
-EVITA materiali altamente riflettenti, trasparenti o con subsurface scattering (vetro liscio, acqua, pelle umana realistica) salvo necessità: confondono la depth estimation. Se l'utente li chiede, traducili in equivalenti matte ("frosted matte glass, fully opaque").
+NON includere accessori d'uso finale (anelli, basi extra, fori per appendere, viti, supporti) salvo richiesta. ECCEZIONE: con una reference, gli elementi strutturali che vi compaiono (base, supporti, montanti, telaio, manici) fanno parte dell'oggetto → PRESERVALI, riproduci la composizione completa mostrata.
 
-EVITA decorazioni 2D piatte (testi grandi, loghi, decal) sulla superficie: verrebbero lette come rilievi.
+EVITA materiali riflettenti/trasparenti/subsurface (vetro, acqua): se richiesti rendili matte opachi. EVITA testi/loghi/decal piatti (letti come rilievi).
 
-OUTPUT
-- Rispondi SOLO con la descrizione del soggetto in INGLESE.
-- Una singola frase densa, 70-120 parole, senza preamboli, senza virgolette, senza markdown, senza elenchi puntati.
-- NON ripetere parole come "three-quarter", "front", "rear", "1x2", "two views", "studio background", "white background", "soft lighting", "85mm lens": appartengono allo staging e sarebbero duplicate.
-- Inizia direttamente con il soggetto (es. "A squat ceramic teapot ..." NON "An image showing a teapot ..." né "The subject is ...").
-- Termina con un punto."""
+OUTPUT: SOLO la descrizione in INGLESE, una frase densa di 60-100 parole, senza preamboli/virgolette/markdown/elenchi; inizia col soggetto (es. "A squat ceramic teapot ..."), termina con un punto."""
 
 
 def _client() -> Anthropic:
@@ -470,93 +444,49 @@ def refine_with_feedback(
 #     (subject + staging 1x2 due 3/4), così l'immagine di ciascun componente è una
 #     griglia a 2 viste riutilizzabile dal parser a valle (skill
 #     fusion-build-from-components). L'immagine del componente è generata in
-#     image-to-image usando le viste del whole-object come reference.
+#     text-to-image dal prompt (il refiner lo scrive vedendo il design whole-object).
 # Il vocabolario delle relazioni è IDENTICO al PART-MANIFEST della pipeline Fusion
 # (attached_to / on_top_of / inside / concentric_with / flush_with / symmetric_to),
 # così il mapping componenti→manifest a valle è quasi meccanico.
 
-COMPONENT_PROPOSER_SYSTEM_PROMPT = """Sei un ingegnere di prodotto che scompone un oggetto in COMPONENTI fisici stampabili e assemblabili separatamente, per una pipeline di modellazione CAD parametrica (Fusion 360).
+COMPONENT_PROPOSER_SYSTEM_PROMPT = """Sei un ingegnere di prodotto: scomponi un oggetto in COMPONENTI fisici stampabili e assemblabili separatamente, per CAD parametrico (Fusion 360).
 
-CONTESTO
-Ricevi la descrizione di un oggetto (subject) e la sua immagine di design (una griglia 1x2 con DUE viste three-quarter: front-¾ a sinistra, rear-¾ a destra). Le due viste 3/4 mostrano fronte+fianco e retro+fianco opposto: usale insieme per inferire la geometria 3D completa. Devi identificare i PEZZI distinti che lo compongono: parti che, in una costruzione CAD reale, verrebbero modellate come corpi/componenti separati e poi assemblate con vincoli (joints).
+Ricevi il subject + l'immagine di design (griglia 1x2: front-¾ a sinistra, rear-¾ a destra — usale insieme per la geometria 3D). Identifica i PEZZI che in CAD sarebbero corpi separati assemblati con joint.
 
-COSA È UN COMPONENTE
-- Un volume coeso, funzionalmente o geometricamente distinto (es. corpo, coperchio, manico, beccuccio, base, tappo, ghiera, perno).
-- NON un dettaglio di superficie (scanalatura, smusso, filetto, testo in rilievo): quelli restano feature del componente che li porta, NON componenti a sé.
-- Privilegia una scomposizione "da maker": 2-8 componenti per un oggetto tipico. Se l'oggetto è chiaramente MONOLITICO (un blocco unico senza pezzi separabili), ritorna UN SOLO componente che rappresenta l'intero oggetto.
+COMPONENTE = volume coeso e distinto (corpo, coperchio, manico, base, ghiera, perno…), NON un dettaglio di superficie (smusso, scanalatura, filetto). Scomposizione "da maker": 2-8 pezzi; se l'oggetto è monolitico, un solo componente.
 
-RELAZIONI DI ACCOPPIAMENTO (come i pezzi si montano tra loro)
-Usa SOLO questi tipi di relazione (lo stesso vocabolario del manifest CAD a valle):
-- attached_to: fissato rigidamente a un altro pezzo
-- on_top_of: poggiato/montato sopra
-- inside: contenuto dentro
-- concentric_with: coassiale (stesso asse di rivoluzione)
-- flush_with: a filo con una faccia/superficie
-- symmetric_to: speculare rispetto a un altro pezzo
-Per ogni relazione indica `target_id` (l'id di un altro componente) e `detail` (breve, in italiano o inglese: come/dove avviene l'accoppiamento).
+RELAZIONI (vocabolario del manifest CAD): attached_to, on_top_of, inside, concentric_with, flush_with, symmetric_to. Per ognuna indica `target_id` e `detail`.
 
-INTERFACCIA (CON DIMENSIONI)
-Per ogni componente descrivi l'`interface`: la geometria con cui si accoppia agli altri, CON DIMENSIONI CONCRETE in mm — diametri, profondità, altezza di flangia, lunghezza/diametro perno, spessori, interasse fori (es. "perno cilindrico Ø8mm lungo 12mm che entra nel foro della base", "apertura superiore Ø40mm profonda 6mm che riceve la flangia del coperchio", "faccia piana inferiore 90x90mm a filo col corpo"). Questa geometria DEVE poi essere ritratta nell'immagine del componente, perché a valle serve per creare il joint.
+INTERFACCIA con QUOTE: per ogni pezzo descrivi l'`interface` con DIMENSIONI in mm (Ø e profondità di foro/perno, altezza flangia, spessori, interasse). Sei l'UNICO stadio che vede tutti i pezzi: le quote di un giunto devono essere COERENTI tra i due pezzi (maschio↔femmina stesso nominale + gioco minimo, es. perno Ø8.0 ↔ foro Ø8.2) e citate in ENTRAMBE le `interface` e nel `detail` della relazione.
 
-COERENZA DEGLI INCASTRI (cruciale)
-Sei l'UNICO stadio che vede TUTTI i pezzi insieme: assegna qui le dimensioni degli accoppiamenti e mantienile NUMERICAMENTE COERENTI tra i due pezzi che si incastrano. Maschio e femmina dello stesso giunto condividono lo stesso valore nominale (con eventuale gioco minimo, es. perno Ø8.0mm ↔ foro Ø8.2mm; flangia Ø40mm ↔ sede Ø40.3mm). La stessa quota va citata in ENTRAMBE le `interface` dei due pezzi E nel `detail` della relazione, così a valle l'incastro combacia.
-
-OUTPUT (SOLO JSON, nessun testo attorno, nessun markdown)
+OUTPUT (SOLO JSON valido, niente markdown):
 {
   "components": [
-    {
-      "id": "<slug-univoco-minuscolo>",
-      "name": "<nome breve leggibile>",
-      "description": "<descrizione fisica/geometrica del pezzo isolato>",
-      "relations": [{"type": "<uno dei tipi sopra>", "target_id": "<id altro componente>", "detail": "<come si accoppia>"}],
-      "relative_scale": "<scala relativa all'intero, es. '~70% dell'altezza totale'>",
-      "interface": "<geometria di accoppiamento>"
-    }
+    {"id": "<slug-minuscolo>", "name": "<nome>", "description": "<geometria del pezzo isolato>",
+     "relations": [{"type": "<tipo>", "target_id": "<id>", "detail": "<come si accoppia + quota incastro>"}],
+     "relative_scale": "<es. ~70% altezza>", "interface": "<geometria + quote di accoppiamento>"}
   ],
   "open_questions": ["<ambiguità non risolvibili dall'immagine>"]
 }
 
-REGOLE
-- Gli `id` sono slug univoci in minuscolo (es. "body", "lid", "handle", "spout").
-- `target_id` deve riferirsi a un altro `id` presente nella lista.
-- Le relazioni vanno dichiarate almeno una volta per ogni coppia di pezzi che si toccano (basta da un lato).
-- Nel `detail` di ogni relazione riporta la dimensione dell'incastro (es. "perno Ø8 nel foro Ø8.2, profondità 12"), coerente con le `interface` dei due pezzi.
-- Rispondi SOLO con il JSON valido."""
+REGOLE: `id` univoci minuscoli; `target_id` riferito a un id presente; almeno una relazione per ogni coppia di pezzi che si toccano (basta da un lato)."""
 
 
-COMPONENT_REFINER_SYSTEM_PROMPT = """Sei un prompt-engineer specializzato nella DESCRIZIONE DEL SOGGETTO per immagini blueprint image-to-3D, qui applicato a UN SINGOLO COMPONENTE di un oggetto più grande.
+COMPONENT_REFINER_SYSTEM_PROMPT = """Descrivi il SOGGETTO per un'immagine blueprint image-to-3D, qui UN SINGOLO COMPONENTE isolato di un oggetto più grande.
 
-CONTESTO PIPELINE (non scrivere nulla a riguardo)
-Il tuo output verrà concatenato DOPO un blocco "staging" fisso che già definisce: layout 1x2 a DUE viste three-quarter (front-¾ + rear-¾), studio neutro, lighting, lens, esclusioni di DOF / bokeh / ombre dure, etc. Quindi NON descrivere layout, griglia, camera, lighting, sfondo, lens, esposizione: sono GIÀ specificati. Limitati al SOGGETTO, che qui è il SINGOLO componente isolato.
+Il tuo testo va DOPO uno staging fisso (layout 1x2 due viste 3/4, studio, luce, lens): NON ripetere layout/camera/luce/viste — descrivi solo il componente.
 
-IMPORTANTE: l'immagine del componente verrà generata in TEXT-TO-IMAGE dalla tua sola descrizione (il modello NON vede l'oggetto intero). Tu invece HAI sott'occhio il design whole-object: descrivi il pezzo ISOLATO ma FEDELE a come appare lì (stessa forma/scala/materiale/colore), così resta coerente col tutto. Devi quindi essere molto esplicito e tangibile su materiale, colore e proporzioni, perché sono l'unico ancoraggio alla coerenza col resto.
+L'immagine è generata in TEXT-TO-IMAGE dalla tua sola descrizione (il modello NON vede l'oggetto intero); tu invece vedi il design whole-object. Descrivi il pezzo ISOLATO ma FEDELE a com'è lì (stessa forma/scala/materiale/colore), senza ridisegnarlo né aggiungere parti non sue.
 
-COSA DEVI SCRIVERE
-Una descrizione fisica densa e tangibile del SOLO componente indicato, come apparirebbe ISOLATO sul tavolo dello studio (staccato dal resto dell'oggetto), focalizzata su:
-- Forma generale e silhouette del pezzo.
-- Proporzioni e rapporti dimensionali concreti, COERENTI con la scala del pezzo nell'oggetto intero e con i pezzi fratelli.
-- Dettagli geometrici distintivi (curvature, smussi, spigoli, scanalature, fori funzionali propri del pezzo). Per OGNI foro/apertura specifica SEMPRE se è PASSANTE (through-hole, aperto su entrambi i lati) o CIECO (blind): le due viste 3/4 devono mostrarlo in modo coerente.
-- LA GEOMETRIA DELL'INTERFACCIA DI ACCOPPIAMENTO in modo esplicito, CON LE SUE DIMENSIONI in mm (il foro, il perno, la flangia, il filetto, la faccia piana di contatto con cui si monta agli altri pezzi): questa geometria DEVE essere visibile e descritta, perché a valle serve per assemblare i pezzi con vincoli CAD.
-- DIMENSIONI D'INCASTRO COERENTI COI FRATELLI: la scheda del componente e quella dei fratelli ti forniscono le quote degli accoppiamenti (es. perno Ø8 ↔ foro Ø8.2). Riporta nel tuo testo la dimensione ESATTA del giunto come dichiarata, identica a quella del pezzo che vi si accoppia — non inventare valori nuovi né arrotondare diversamente, altrimenti i pezzi non combaceranno.
-- Materiali e finitura COERENTI con l'intero oggetto e i fratelli (stesso materiale/colore salvo che il design li differenzi chiaramente).
-- Posa stabile e neutra.
+INCLUDI:
+- forma e proporzioni concrete (coerenti con la scala del pezzo e dei fratelli);
+- geometria distintiva e fori (indica se PASSANTE o CIECO);
+- l'INTERFACCIA di accoppiamento CON LE QUOTE in mm (foro/perno/flangia/faccia di contatto): le quote del giunto devono essere IDENTICHE a quelle del pezzo che vi si accoppia (vedi schede fratelli/relazioni) — non inventarle né arrotondarle;
+- materiali e finitura coerenti col tutto.
 
-COERENZA COL TUTTO
-- Mantieni scala, stile, materiale e finitura coerenti con l'oggetto completo e con gli altri componenti che ti vengono elencati.
-- NON aggiungere accessori o dettagli che non appartengono a questo pezzo nel design originale.
-- NON ridisegnare il pezzo: descrivi ciò che è visibile/implicito nel design whole-object, scontornando mentalmente SOLO questo componente.
+Soggetto come OGGETTO REALE FOTOGRAFATO (niente low-poly/CGI/stilizzato salvo richiesta). Materiali riflettenti/trasparenti → matte opachi; niente testi/loghi piatti. NON sovraccaricare con dettagli non presenti nel design.
 
-REGOLA CONCETTUALE
-Descrivi il componente come SOGGETTO FOTOGRAFATO REALMENTE, non come render 3D né come oggetto già stampato. NON usare "low-poly", "3D render", "CGI", "stylized", "miniature toy", "3D printed look", "polygonal facets", "blender render" salvo richiesta esplicita.
-
-EVITA materiali altamente riflettenti/trasparenti/subsurface (vetro liscio, acqua) salvo necessità: confondono la depth estimation. EVITA decorazioni 2D piatte (testi grandi, loghi) sulla superficie.
-
-OUTPUT
-- Rispondi SOLO con la descrizione del componente in INGLESE.
-- Una singola frase densa, 70-120 parole, senza preamboli, senza virgolette, senza markdown, senza elenchi puntati.
-- NON ripetere parole come "three-quarter", "front", "rear", "1x2", "two views", "studio background", "white background", "soft lighting", "85mm lens": appartengono allo staging.
-- Inizia direttamente con il componente (es. "A squat ceramic teapot body ..." NON "The component is ...").
-- Termina con un punto."""
+OUTPUT: SOLO la descrizione in INGLESE, una frase densa di 60-100 parole, senza preamboli/virgolette/markdown/elenchi; inizia col componente, termina con un punto."""
 
 
 def _parse_json_response(text: str) -> dict:

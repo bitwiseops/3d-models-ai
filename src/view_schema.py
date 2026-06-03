@@ -71,7 +71,7 @@ OBJECT_VIEWS = ViewSchema(
             prompt_angle=(
                 "front three-quarter view: the object rotated ~35 degrees around "
                 "the vertical axis so its front face and one flank are both visible, "
-                "tilted ~10 degrees downward"
+                "same camera elevation as the other view"
             ),
             blender_axis="FRONT",
             fusion_camera={"view_dir": [1, 1, -1], "up": [0, 0, 1], "ortho": False},
@@ -84,7 +84,7 @@ OBJECT_VIEWS = ViewSchema(
             prompt_angle=(
                 "rear three-quarter view: the same object rotated ~215 degrees "
                 "around the vertical axis so its back face and the opposite flank "
-                "are both visible, same camera height and tilt"
+                "are both visible, same camera elevation as the other view"
             ),
             blender_axis="BACK",
             fusion_camera={"view_dir": [-1, -1, -1], "up": [0, 0, 1], "ortho": False},
