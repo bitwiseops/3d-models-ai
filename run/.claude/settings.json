@@ -72,14 +72,14 @@
       "Bash(uv run *)"
     ],
     "deny": [
-      "Write(/home/bitwise/Projects/3d-models-ai/src/**)",
-      "Edit(/home/bitwise/Projects/3d-models-ai/src/**)",
-      "Write(/home/bitwise/Projects/3d-models-ai/run/.claude/skills/**)",
-      "Edit(/home/bitwise/Projects/3d-models-ai/run/.claude/skills/**)",
-      "Write(/home/bitwise/Projects/3d-models-ai/tools/**)",
-      "Edit(/home/bitwise/Projects/3d-models-ai/tools/**)",
-      "Write(/home/bitwise/Projects/3d-models-ai/pyproject.toml)",
-      "Edit(/home/bitwise/Projects/3d-models-ai/pyproject.toml)"
+      "Write(./src/**)",
+      "Edit(./src/**)",
+      "Write(./run/.claude/skills/**)",
+      "Edit(./run/.claude/skills/**)",
+      "Write(./tools/**)",
+      "Edit(./tools/**)",
+      "Write(./pyproject.toml)",
+      "Edit(./pyproject.toml)"
     ]
   },
   "enabledMcpjsonServers": ["blender", "fusion"]
